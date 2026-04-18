@@ -1,0 +1,6 @@
+[submodule "Bonsai-data-representation"]
+	path = Bonsai-data-representation
+	url = https://github.com/dhdegroot/Bonsai-data-representation.git
+[submodule "Sanity"]
+	path = Sanity
+	url = https://github.com/stanfish06/Sanity.git
