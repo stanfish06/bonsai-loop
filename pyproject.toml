@@ -9,7 +9,7 @@ description = "A data analysis project using Bonsai-data-representation"
 readme = "README.md"
 authors = [
   { name = "Zhiyuan (Stan) Yu", email = "zyyu@umich.edu" },
-  { name = "Daan de Groot", email = "daanhugodegroot@gmail.com" }
+  { name = "Daan de Groot", email = "daanhugodegroot@gmail.com" },
   { name = "Idse Heemskerk", email = "idse.heemskerk@gmail.com" }
 ]
 requires-python = ">=3.9,<3.10"
