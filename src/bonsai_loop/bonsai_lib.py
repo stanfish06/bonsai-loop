@@ -8,6 +8,7 @@ if str(_BONSAI) not in sys.path:
 
 import bonsai
 import bonsai_scout
+import downstream_analyses
 import paper_figure_scripts_and_notebooks as bonsai_paper
 import paper_figure_scripts_and_notebooks.simulating_datasets as _bonsai_simulating_datasets
 import paper_figure_scripts_and_notebooks.simulating_datasets.analyzing_simulated_datasets as _bonsai_simulated_datasets
@@ -15,6 +16,7 @@ import paper_figure_scripts_and_notebooks.simulating_datasets.analyzing_simulate
 
 sys.modules[f"{__name__}.bonsai"] = bonsai
 sys.modules[f"{__name__}.bonsai_scout"] = bonsai_scout
+sys.modules[f"{__name__}.downstream_analyses"] = downstream_analyses
 sys.modules[f"{__name__}.bonsai_paper"] = bonsai_paper
 sys.modules[f"{__name__}.bonsai_paper.simulating_datasets"] = (
     _bonsai_simulating_datasets
@@ -32,9 +34,8 @@ from scipy.spatial.distance import squareform
 
 # import relevant functions for distance computation
 # pretend to be submodules of bonsai_lib
-from .bonsai_lib.bonsai.downstream_analyses.get_clusters_max_diameter import (
-    get_cluster_assignments,
-    get_annotation_based_clustering_from_nwk_str,
+from .bonsai_lib.downstream_analyses import (
+    get_clusters_max_diameter as bonsai_clustering,
 )
 from .bonsai_lib.bonsai.bonsai_dataprocessing import get_bonsai_euclidean_distances
 from .bonsai_lib.bonsai_scout.my_tree_layout import Layout_Tree
@@ -108,7 +109,6 @@ __all__ = [
     "get_pdists_on_tree_euclidean",
     "get_bonsai_euclidean_distances",
     "get_pdists_on_tree",
-    "get_cluster_assignments",
-    "get_annotation_based_clustering_from_nwk_str",
+    "bonsai_clustering",
     "Layout_Tree",
 ]
