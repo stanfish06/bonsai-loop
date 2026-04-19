@@ -2,6 +2,10 @@
 
 Trajectory analysis of human 2D gastruloid data using the package [Bonsai-data-representation](https://github.com/dhdegroot/Bonsai-data-representation.git).
 
+## Data
+
+Datasets used for notebooks have been uploaded to zenodo and made public, and the code for downloading data has been added to each notebook.
+
 ## Setup
 
 Two required packages (`Sanity` and `Bonsai-data-representation`) are included as git submodules:
