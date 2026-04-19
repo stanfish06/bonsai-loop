@@ -216,7 +216,7 @@ wheels = [
 
 [[package]]
 name = "bonsai-loop"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "dtne" },
@@ -246,7 +246,7 @@ requires-dist = [
     { name = "jupyterlab", specifier = ">=4.5.6" },
     { name = "matplotlib", specifier = "==3.8.4" },
     { name = "natsort", specifier = "==8.4" },
-    { name = "phate", specifier = ">=2.0.0" },
+    { name = "phate", specifier = ">=2" },
     { name = "psutil", specifier = "==7.1.3" },
     { name = "ruamel-yaml", specifier = "==0.18.6" },
     { name = "scanpy", specifier = ">=1.10.3" },

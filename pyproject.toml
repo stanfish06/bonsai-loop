@@ -4,7 +4,7 @@ requires = [ "uv-build>=0.9.22,<0.10" ]
 
 [project]
 name = "bonsai-loop"
-version = "0.1.0"
+version = "0.1.1"
 description = "A data analysis project using Bonsai-data-representation"
 readme = "README.md"
 authors = [
