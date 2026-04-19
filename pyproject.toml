@@ -11,11 +11,28 @@ authors = [
   { name = "Zhiyuan (Stan) Yu", email = "zyyu@umich.edu" },
   { name = "Daan de Groot", email = "daanhugodegroot@gmail.com" }
 ]
-requires-python = ">=3.12"
-classifiers = [
-  "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
+requires-python = "~=3.9"
+dependencies = [
+  "faicons==0.2.2",
+  "h5py==3.11",
+  "jinja2==3.1.3",
+  "jupyterlab>=4.5.6",
+  # bonsai-scout
+  "matplotlib==3.8.4",
+  # bonsai requirements
+  "natsort==8.4",
+  "psutil==7.1.3",
+  "ruamel-yaml==0.18.6",
+  "scanpy>=1.10.3",
+  "scikit-learn==1.5.2",
+  "scipy==1.13.1",
+  "shiny==0.9",
+  "shinyswatch==0.6.1",
+  "tables==3.9.2",
 ]
-dependencies = []
+
+[tool.ruff]
+exclude = [
+  "Bonsai-data-representation",
+  "Sanity",
+]

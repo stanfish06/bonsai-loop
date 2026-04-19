@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+_activate() {
+    source ".venv/bin/activate"
+    export PYTHONPATH="./Bonsai-data-representation${PYTHONPATH:+:$PYTHONPATH}"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    _activate
+    echo "Run exit to deactivate venv"
+    exec "${SHELL:-/bin/bash}"
+else
+    _activate
+    echo "Run deactivate to deactivate venv"
+fi
