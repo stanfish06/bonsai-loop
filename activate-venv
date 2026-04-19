@@ -1,15 +1,33 @@
 #!/usr/bin/env bash
 
-_activate() {
-    source ".venv/bin/activate"
-    export PYTHONPATH="./Bonsai-data-representation${PYTHONPATH:+:$PYTHONPATH}"
+_root() {
+    if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+        (cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+        return 0
+    fi
+    local d="$PWD"
+    while [[ "$d" != "/" ]]; do
+        if [[ -f "$d/.venv/bin/activate" && -d "$d/Bonsai-data-representation" ]]; then
+            printf '%s\n' "$d"
+            return 0
+        fi
+        d="$(dirname "$d")"
+    done
+    return 1
 }
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    _activate
+_activate() {
+    local r
+    r="$(_root)" || return 1
+    source "${r}/.venv/bin/activate"
+    export PYTHONPATH="${r}/Bonsai-data-representation${PYTHONPATH:+:${PYTHONPATH}}"
+}
+
+if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" ]]; then
+    _activate || exit 1
     echo "Run exit to deactivate venv"
     exec "${SHELL:-/bin/bash}"
 else
-    _activate
+    _activate || return 1
     echo "Run deactivate to deactivate venv"
 fi
