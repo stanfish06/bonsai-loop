@@ -32,6 +32,10 @@ from scipy.spatial.distance import squareform
 
 # import relevant functions for distance computation
 # pretend to be submodules of bonsai_lib
+from .bonsai_lib.bonsai.downstream_analyses.get_clusters_max_diameter import (
+    get_cluster_assignments,
+    get_annotation_based_clustering_from_nwk_str,
+)
 from .bonsai_lib.bonsai.bonsai_dataprocessing import get_bonsai_euclidean_distances
 from .bonsai_lib.bonsai_scout.my_tree_layout import Layout_Tree
 from .bonsai_lib.bonsai_paper.simulating_datasets.analyzing_simulated_datasets.knn_recall_helpers import (
@@ -104,5 +108,7 @@ __all__ = [
     "get_pdists_on_tree_euclidean",
     "get_bonsai_euclidean_distances",
     "get_pdists_on_tree",
+    "get_cluster_assignments",
+    "get_annotation_based_clustering_from_nwk_str",
     "Layout_Tree",
 ]
