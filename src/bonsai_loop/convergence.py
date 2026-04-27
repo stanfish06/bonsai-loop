@@ -7,7 +7,7 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist
-from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode
+from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode  # type: ignore[import]
 
 
 @dataclass
@@ -27,6 +27,11 @@ class TreeNodeExtraData:
         Label composition of annotated descendant leaves.
     n_leaves : int | None
         Number of annotated descendant leaves represented in identity.
+    dendrogram_coords : tuple[float, float] | None
+        2D coordinate in the ladderized dendrogram representation of the tree. Nodes with more descendent leaves have higher y-values.
+            - (x, y)
+                - x: sum of tree edge lengths along the branch from root
+                - y: number of descendent leaves
     ordering_value : float | None
         The 1D global ordering value of the node in the Bonsai phylogenetic tree, with these potential versions:
             - bonsai tree distance to a specific node (e.g. root)
@@ -42,6 +47,7 @@ class TreeNodeExtraData:
     identity: dict | None = None
     n_leaves: int | None = None
     ordering_value: float | None = None
+    dendrogram_coords: tuple[float, float] | None = None
     other_props: dict | None = None
 
     def __repr__(self) -> str:
@@ -61,6 +67,7 @@ class TreeNodeExtraData:
             "identity": _print_identity(self.identity, top_n=3),
             "n_leaves": self.n_leaves,
             "ordering_value": self.ordering_value,
+            "dendrogram_coords": self.dendrogram_coords,
             "other_props": self.other_props,
         }
 
@@ -151,6 +158,88 @@ class TreeNodeExtraData:
             self.identity = None
 
 
+def compute_bonsai_tree_dendrogram(
+    tree: Tree,
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    ladderize_by_annotated_leaves_only: bool = False,
+) -> None:
+    """
+    Compute Bonsai dendrogram coordinates for every node.
+
+    This replicates the dendrogram layout used by Bonsai Scout:
+        - leaf y-values are evenly spaced after ladderized tree traversal
+        - internal y-values are the mean y-values of their children
+        - x-values are cumulative Bonsai tParent distances from the root, rescaled
+          to the default dendrogram x-range
+
+    Parameters
+    ----------
+    tree : bonsai.bonsai_treeHelpers.Tree
+        Bonsai tree used to compute dendrogram coordinates.
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        A map from TreeNode.nodeId to TreeNodeExtraData.
+    ladderize_by_annotated_leaves_only : bool
+        Whether to ladderize child branches by annotated descendant leaf counts
+        stored in TreeNodeExtraData.n_leaves. If False, ladderize by all descendant
+        leaves using TreeNode.dsLeafs.
+
+    Returns
+    -------
+    None
+        Dendrogram coordinates are stored in TreeNodeExtraData.dendrogram_coords.
+    """
+    xlims = (-0.95, 0.95)
+    ylims = (-0.95, 0.95)
+
+    if not ladderize_by_annotated_leaves_only:
+        tree.root.get_ds_info_for_ladderize()
+
+    def _get_child_weight(node: TreeNode) -> int:
+        if ladderize_by_annotated_leaves_only:
+            n_leaves = node_data_lookup[node.nodeId].n_leaves
+            return n_leaves if n_leaves is not None else 0
+        return int(node.dsLeafs)
+
+    def _get_ladderized_leaves(node: TreeNode) -> list[TreeNode]:
+        if node.isLeaf:
+            return [node]
+        leafs = []
+        child_nodes = sorted(node.childNodes, key=_get_child_weight)
+        for child_node in child_nodes:
+            leafs += _get_ladderized_leaves(child_node)
+        return leafs
+
+    x_coords: dict[str, float] = {}
+    y_coords: dict[str, float] = {}
+
+    def _compute_x_coords(node: TreeNode, x: float = 0.0) -> None:
+        x_coords[node.nodeId] = x
+        for child_node in node.childNodes:
+            _compute_x_coords(child_node, x + float(child_node.tParent))
+
+    def _compute_y_coords(node: TreeNode) -> float:
+        if node.isLeaf:
+            return y_coords[node.nodeId]
+        child_y_coords = [
+            _compute_y_coords(child_node) for child_node in node.childNodes
+        ]
+        y_coords[node.nodeId] = float(np.mean(child_y_coords))
+        return y_coords[node.nodeId]
+
+    leafs = _get_ladderized_leaves(tree.root)
+    leaf_y_coords = np.linspace(ylims[0], ylims[1], len(leafs))
+    for leaf, y in zip(leafs, leaf_y_coords):
+        y_coords[leaf.nodeId] = float(y)
+
+    _compute_x_coords(tree.root)
+    _compute_y_coords(tree.root)
+
+    x_max = max(x_coords.values())
+    for node_id, node_data in node_data_lookup.items():
+        x = x_coords[node_id] / (x_max / (xlims[1] - xlims[0])) + xlims[0]
+        node_data.dendrogram_coords = (float(x), y_coords[node_id])
+
+
 def compute_node_ordering_value(
     tree: Tree,
     node_data_lookup: dict[str, TreeNodeExtraData],
@@ -176,8 +265,6 @@ def compute_node_ordering_value(
         Whether to compute internal node ordering values by aggregating leaf ordering
         values.
     """
-    if metric == "dendrogram":
-        raise NotImplementedError(f"no impl for subroutine {metric}")
     if aggregate_metric_from_leaves:
         raise NotImplementedError("no impl for subroutine aggregate metric from leaves")
     print(f"compute node ordering using metric {metric}")
@@ -193,6 +280,13 @@ def compute_node_ordering_value(
         for node_id, node_data in node_data_lookup.items():
             node_data.ordering_value = (
                 tree_dists_to_root[node_id] if node_id in tree_dists_to_root else None
+            )
+    elif metric == "dendrogram":
+        for node_id, node_data in node_data_lookup.items():
+            node_data.ordering_value = (
+                node_data.dendrogram_coords[1]
+                if node_data.dendrogram_coords is not None
+                else None
             )
 
 
