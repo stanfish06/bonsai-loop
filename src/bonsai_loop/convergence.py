@@ -28,10 +28,10 @@ class TreeNodeExtraData:
     n_leaves : int | None
         Number of annotated descendant leaves represented in identity.
     dendrogram_coords : tuple[float, float] | None
-        2D coordinate in the ladderized dendrogram representation of the tree. Nodes with more descendent leaves have higher y-values.
+        2D coordinate in the ladderized dendrogram representation of the tree.
             - (x, y)
                 - x: sum of tree edge lengths along the branch from root
-                - y: number of descendent leaves
+                - y: vertical position in the dendrogram
     ordering_value : float | None
         The 1D global ordering value of the node in the Bonsai phylogenetic tree, with these potential versions:
             - bonsai tree distance to a specific node (e.g. root)
@@ -131,8 +131,6 @@ class TreeNodeExtraData:
         n_leaves: int | None = None
         identity_count: Counter | None = None
         for child_node_data in node_data_children:
-            if child_node_data is None:
-                continue
             c_n_leaves = child_node_data.n_leaves
             c_identity = child_node_data.identity
             if c_identity is None or not c_identity:
@@ -236,7 +234,11 @@ def compute_bonsai_tree_dendrogram(
 
     x_max = max(x_coords.values())
     for node_id, node_data in node_data_lookup.items():
-        x = x_coords[node_id] / (x_max / (xlims[1] - xlims[0])) + xlims[0]
+        x = (
+            x_coords[node_id] / (x_max / (xlims[1] - xlims[0])) + xlims[0]
+            if x_max > 0
+            else xlims[0]
+        )
         node_data.dendrogram_coords = (float(x), y_coords[node_id])
 
 
@@ -359,16 +361,22 @@ def compute_node_ordering(
         node_data_items = sorted(
             node_data_items,
             key=lambda x: (
-                sum(
-                    identity_ordering_value[k] * v
-                    for k, v in x[1].identity.items()
-                    if k in identity_ordering_value
+                (
+                    0,
+                    sum(
+                        identity_ordering_value[k] * v
+                        for k, v in x[1].identity.items()
+                        if k in identity_ordering_value
+                    ),
                 )
                 if x[1].identity is not None
-                else float("nan"),
-                x[1].ordering_value
+                else (1, 0.0),
+                (
+                    0,
+                    x[1].ordering_value,
+                )
                 if x[1].ordering_value is not None
-                else float("nan"),
+                else (1, 0.0),
             ),
             reverse=not ascending,
         )
@@ -376,7 +384,9 @@ def compute_node_ordering(
         node_data_items = sorted(
             node_data_items,
             key=lambda x: (
-                x[1].ordering_value if x[1].ordering_value is not None else float("nan")
+                (0, x[1].ordering_value)
+                if x[1].ordering_value is not None
+                else (1, 0.0)
             ),
             reverse=not ascending,
         )
@@ -451,7 +461,7 @@ def compute_tree_node_level_and_label(
             node_data = TreeNodeExtraData(
                 tree_node=node,
                 topological_level=0,
-                geometric_level=0.0,
+                geometric_level=0.0 if node_level_type == "geometric" else None,
                 identity={node_label: 1.0} if node_label is not None else None,
                 n_leaves=1,
             )
@@ -480,7 +490,7 @@ def compute_tree_node_level_and_label(
 def get_pdists_on_tree_by_level(
     tree: Tree,
     node_data_lookup: dict[str, TreeNodeExtraData],
-    type: Literal["bonsai_t", "euclidean"] = "bonsai_t",
+    dist_type: Literal["bonsai_t", "euclidean"] = "bonsai_t",
     level: int = 0,
 ) -> tuple[np.ndarray, list[str]]:
     """
@@ -492,7 +502,7 @@ def get_pdists_on_tree_by_level(
         Bonsai tree used to compute shortest-path distances.
     node_data_lookup : dict[str, TreeNodeExtraData]
         A map from TreeNode.nodeId to TreeNodeExtraData with valid topological_level.
-    type : {"bonsai_t", "euclidean"}
+    dist_type : {"bonsai_t", "euclidean"}
         The edge weight used for shortest-path distances:
             - "bonsai_t": use Bonsai tParent edge lengths
             - "euclidean": use squared Euclidean distances between posterior node coordinates
@@ -512,11 +522,11 @@ def get_pdists_on_tree_by_level(
         if level == -1 or node_data.topological_level == level
     ]
     edge_df: pd.DataFrame = tree.get_edge_dataframe()
-    if type == "bonsai_t":
+    if dist_type == "bonsai_t":
         G = nx.from_pandas_edgelist(
             edge_df, source="source", target="target", edge_attr="dist"
         )
-    elif type == "euclidean":
+    elif dist_type == "euclidean":
         G = nx.Graph()
         for _, row in edge_df.iterrows():
             src, tgt = str(row["source"]), str(row["target"])
