@@ -23,8 +23,8 @@ class TreeNodeExtraData:
         Label composition of annotated descendant leaves.
     n_leaves : int | None
         Number of annotated descendant leaves represented in identity.
-    phylogeny_position : float | None
-        The global position of the node in the Bonsai phylogenetic tree, with these potential versions:
+    ordering_value : float | None
+        The 1D global ordering value of the node in the Bonsai phylogenetic tree, with these potential versions:
             - bonsai tree distance to a specific node (e.g. root)
             - vertical distance in the dendrogram (e.g. nodes with fewer branches (more advanved) are placed higher)
             - computed from its descendents
@@ -35,7 +35,7 @@ class TreeNodeExtraData:
     geometric_level: float | None = None
     identity: dict | None = None
     n_leaves: int | None = None
-    phylogeny_position: float | None = None
+    ordering_value: float | None = None
 
     def compute_topological_level(
         self, node_data_children: list[TreeNodeExtraData]
@@ -110,11 +110,26 @@ class TreeNodeExtraData:
             self.identity = None
 
 
+def compute_node_ordering_value(
+    tree: Tree,
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    metric: Literal["bonsai_t_to_root", "dendrogram"],
+    aggregate_metric_from_leaves: bool = False,
+) -> None:
+    pass
+
+
+def compute_node_ordering(
+    node_data_lookup: dict[str, TreeNodeExtraData],
+) -> list[str]:
+    return []
+
+
 def compute_tree_node_level_and_label(
     tree: Tree,
     node_level_type: Literal["topological", "geometric"],
     label_lookup_leaves: dict | None = None,
-) -> dict:
+) -> dict[str, TreeNodeExtraData]:
     """
     Compute the tree topology level and label of each node.
     - tree is likely imbalanced, so resolve level with the deepest substree.
