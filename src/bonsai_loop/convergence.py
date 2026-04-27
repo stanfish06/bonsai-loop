@@ -44,6 +44,28 @@ class TreeNodeExtraData:
     ordering_value: float | None = None
     other_props: dict | None = None
 
+    def __repr__(self) -> str:
+        attrs = {
+            "tree_node": f"TreeNode(nodeId={self.tree_node.nodeId!r})",
+            "topological_level": self.topological_level,
+            "geometric_level": self.geometric_level,
+            "identity": self.identity,
+            "n_leaves": self.n_leaves,
+            "ordering_value": self.ordering_value,
+            "other_props": self.other_props,
+        }
+        key_width = max(len(k) for k in attrs)
+        value_width = max(len(str(v)) for v in attrs.values())
+        top = f"┌{'─' * (key_width + 2)}┬{'─' * (value_width + 2)}┐"
+        header = f"│ {'attribute'.ljust(key_width)} │ {'value'.ljust(value_width)} │"
+        sep = f"├{'─' * (key_width + 2)}┼{'─' * (value_width + 2)}┤"
+        rows = [
+            f"│ {k.ljust(key_width)} │ {str(v).ljust(value_width)} │"
+            for k, v in attrs.items()
+        ]
+        bottom = f"└{'─' * (key_width + 2)}┴{'─' * (value_width + 2)}┘"
+        return "\n".join([top, header, sep, *rows, bottom])
+
     def compute_topological_level(
         self, node_data_children: list[TreeNodeExtraData]
     ) -> None:
