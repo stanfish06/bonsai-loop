@@ -15,7 +15,27 @@ class TreeNodeExtraData:
     def compute_topological_level(
         self, node_data_children: list[TreeNodeExtraData]
     ) -> None:
-        pass
+        """
+        Helper function to compute topological node level from the leaves (level = 0). Level increases toward the tree root.
+        When child sub-trees have different heights, compute their root's level using the substree with max height.
+            ┌── C
+            A   ┌── E
+            └── B
+                └── D
+            - Levels:
+                - C = E = D = 0
+                - B = 1
+                - A = 2 = level(B) + 1
+        """
+        levels = [
+            child_node_data.topological_level + 1
+            for child_node_data in node_data_children
+            if child_node_data.topological_level is not None
+        ]
+        if self.topological_level is not None:
+            levels.append(self.topological_level)
+        if levels:
+            self.topological_level = max(levels)
 
     def compute_identity(self, node_data_children: list[TreeNodeExtraData]) -> None:
         pass
@@ -33,10 +53,10 @@ def compute_tree_node_level_and_label(
         A   ┌── E
         └── B
             └── D
-        - depths:
+        - Levels:
             - C = E = D = 0
             - B = 1
-            - A = 2
+            - A = 2 = level(B) + 1
     - for label, assuming only leaves have labels, compute descendent identity composition for internal nodes, such as:
         A (75% dog, 25% cat, n = 4)
         ├── B (100% dog, n = 1) ── C (dog, n = 1)
