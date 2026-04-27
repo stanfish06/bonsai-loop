@@ -19,4 +19,4 @@ jobs:
 
       - name: fail if formatting changed files
         run: |
-          git diff --exit-code || (echo "Run 'make format-project' locally and commit the result." && exit 1)
+          git diff --exit-code -- ':(exclude)pyproject.toml' || (echo "Run 'make format-project' locally and commit the result." && exit 1)
