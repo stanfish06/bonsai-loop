@@ -161,7 +161,25 @@ def compute_node_ordering(
         The level (from leaves) to compute the ordering. The default is -1, meaning all nodes in the tree.
     sort_by_identity_first : bool
         Whether to sort by the mean ordering_value of the identity before each node's ordering_value.
-        Default is True, which might be helpful to group similar nodes.
+        Default is True, which might be helpful to group similar nodes. For example, let
+                ┌── G (dog, n = 1)
+            ┌── C (100% dog, 0% cat, n = 2)
+            │   └── F (dog, n = 1)
+            A (75% dog, 25% cat, n = 4)
+            │   ┌── E (dog, n = 1)
+            └── B (50% dog, 50% cat, n = 2)
+                └── D (cat, n = 1)
+            - Let v_X be the ordering value of node X
+                - For the leaf level, if we sort by identity first, we first compute vmean_dog and vmean_cat
+                    - vmean_dog = (v_G + v_F + v_E) / 3
+                    - vmean_cat = v_D
+                    - then suppose vmean_cat > vmean_dog, v_G > v_D > v_E > v_F, and we sort in ascending order
+                        - the final order will be [v_F, v_E, v_G, v_D]
+                - For other levels or all nodes, there will be fractional identity, so compute weighted identity mean.
+                - For instance, for level 1
+                    - vmean_dog = (v_C + 0.5 * v_B) / (1 + 0.5)
+                    - vmean_cat = 0.5 * v_B / 0.5 = v_B
+
     ascending : bool
         Sort by increasing or decreasing ordering_value
 
