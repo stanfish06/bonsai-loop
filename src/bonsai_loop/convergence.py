@@ -6,7 +6,9 @@ from collections import Counter
 import networkx as nx
 import numpy as np
 import pandas as pd
-from scipy.spatial.distance import pdist
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import shortest_path
+from scipy.spatial.distance import pdist, squareform
 from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode  # type: ignore[import]
 
 
@@ -537,25 +539,42 @@ def get_pdists_on_tree_by_level(
         if level == -1 or node_data.topological_level == level
     ]
     edge_df: pd.DataFrame = tree.get_edge_dataframe()
+    node_id_to_ind = {node_id: i for i, node_id in enumerate(node_data_lookup)}
+    edge_sources = [str(x) for x in edge_df["source"].to_list()]
+    edge_targets = [str(x) for x in edge_df["target"].to_list()]
+    cols = np.array([node_id_to_ind[node_id] for node_id in edge_sources], dtype=int)
+    rows = np.array([node_id_to_ind[node_id] for node_id in edge_targets], dtype=int)
+
     if dist_type == "bonsai_t":
-        G = nx.from_pandas_edgelist(
-            edge_df, source="source", target="target", edge_attr="dist"
-        )
+        weights = edge_df["dist"].to_numpy(dtype=float)
     elif dist_type == "euclidean":
-        G = nx.Graph()
-        for _, row in edge_df.iterrows():
-            src, tgt = str(row["source"]), str(row["target"])
+        weights_list = []
+        for src, tgt in zip(edge_sources, edge_targets):
             src_ltqs = node_data_lookup[src].tree_node.ltqsAIRoot
             tgt_ltqs = node_data_lookup[tgt].tree_node.ltqsAIRoot
-            G.add_edge(src, tgt, dist=np.mean((src_ltqs - tgt_ltqs) ** 2))
-    n = len(node_ids)
-    dists = np.zeros(n * (n - 1) // 2)
-    idx = 0
-    for i, src in enumerate(node_ids):
-        lengths = nx.shortest_path_length(G, source=src, weight="dist")
-        for j in range(i + 1, n):
-            dists[idx] = lengths.get(node_ids[j], np.nan)
-            idx += 1
+            weights_list.append(np.mean((src_ltqs - tgt_ltqs) ** 2))
+        weights = np.array(weights_list, dtype=float)
+
+    cols_complete = np.concatenate((cols, rows))
+    rows_complete = np.concatenate((rows, cols))
+    weights_complete = np.concatenate((weights, weights))
+    distance_csr = csr_matrix(
+        (weights_complete, (rows_complete, cols_complete)),
+        shape=(len(node_id_to_ind), len(node_id_to_ind)),
+    )
+    indices = [node_id_to_ind[node_id] for node_id in node_ids]
+    dists = squareform(
+        shortest_path(
+            distance_csr,
+            method="auto",
+            directed=False,
+            return_predecessors=False,
+            unweighted=False,
+            overwrite=False,
+            indices=indices,
+        )[:, indices],
+        checks=False,
+    )
     return dists, node_ids
 
 
