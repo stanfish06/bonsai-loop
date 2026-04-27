@@ -188,7 +188,53 @@ def compute_node_ordering(
     node_ids_ordered : list[str]
         A list of ordered node ids
     """
-    node_ids_ordered = []
+    node_data_items = [
+        (node_id, node_data)
+        for node_id, node_data in node_data_lookup.items()
+        if level == -1 or node_data.topological_level == level
+    ]
+
+    if sort_by_identity_first:
+        identity_ordering_value_sum = Counter()
+        identity_weight_sum = Counter()
+        for _, node_data in node_data_items:
+            if node_data.identity is None or node_data.ordering_value is None:
+                continue
+            for k, v in node_data.identity.items():
+                identity_ordering_value_sum[k] += v * node_data.ordering_value
+                identity_weight_sum[k] += v
+
+        identity_ordering_value = {
+            k: identity_ordering_value_sum[k] / identity_weight_sum[k]
+            for k in identity_weight_sum
+        }
+
+        node_data_items = sorted(
+            node_data_items,
+            key=lambda x: (
+                sum(
+                    identity_ordering_value[k] * v
+                    for k, v in x[1].identity.items()
+                    if k in identity_ordering_value
+                )
+                if x[1].identity is not None
+                else float("nan"),
+                x[1].ordering_value
+                if x[1].ordering_value is not None
+                else float("nan"),
+            ),
+            reverse=not ascending,
+        )
+    else:
+        node_data_items = sorted(
+            node_data_items,
+            key=lambda x: (
+                x[1].ordering_value if x[1].ordering_value is not None else float("nan")
+            ),
+            reverse=not ascending,
+        )
+
+    node_ids_ordered = [node_id for node_id, _ in node_data_items]
 
     return node_ids_ordered
 
