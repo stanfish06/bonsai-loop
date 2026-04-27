@@ -4,7 +4,9 @@ from typing import Literal
 from dataclasses import dataclass
 from collections import Counter
 import networkx as nx
+import numpy as np
 import pandas as pd
+from scipy.spatial.distance import pdist
 from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode
 
 
@@ -330,9 +332,50 @@ def compute_tree_node_level_and_label(
     return node_data_lookup
 
 
-def get_pdists_on_tree_by_depth(type: Literal["bonsai_t", "euclidean"], depth: int = 0):
-    pass
+def get_pdists_on_tree_by_level(
+    tree: Tree,
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    type: Literal["bonsai_t", "euclidean"] = "bonsai_t",
+    level: int = 0,
+) -> tuple[np.ndarray, list[str]]:
+    node_ids = [
+        node_id
+        for node_id, node_data in node_data_lookup.items()
+        if level == -1 or node_data.topological_level == level
+    ]
+    edge_df: pd.DataFrame = tree.get_edge_dataframe()
+    if type == "bonsai_t":
+        G = nx.from_pandas_edgelist(
+            edge_df, source="source", target="target", edge_attr="dist"
+        )
+    elif type == "euclidean":
+        G = nx.Graph()
+        for _, row in edge_df.iterrows():
+            src, tgt = str(row["source"]), str(row["target"])
+            src_ltqs = node_data_lookup[src].tree_node.ltqsAIRoot
+            tgt_ltqs = node_data_lookup[tgt].tree_node.ltqsAIRoot
+            G.add_edge(src, tgt, dist=np.mean((src_ltqs - tgt_ltqs) ** 2))
+    n = len(node_ids)
+    dists = np.zeros(n * (n - 1) // 2)
+    idx = 0
+    for i, src in enumerate(node_ids):
+        lengths = nx.shortest_path_length(G, source=src, weight="dist")
+        for j in range(i + 1, n):
+            dists[idx] = lengths.get(node_ids[j], np.nan)
+            idx += 1
+    return dists, node_ids
 
 
-def get_pdists_embedding_by_depth(depth: int = 0):
-    pass
+def get_pdists_embedding_by_level(
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    level: int = 0,
+) -> tuple[np.ndarray, list[str]]:
+    node_ids = [
+        node_id
+        for node_id, node_data in node_data_lookup.items()
+        if level == -1 or node_data.topological_level == level
+    ]
+    coords = np.array(
+        [node_data_lookup[node_id].tree_node.ltqsAIRoot for node_id in node_ids]
+    )
+    return pdist(coords, metric="sqeuclidean") / coords.shape[1], node_ids
