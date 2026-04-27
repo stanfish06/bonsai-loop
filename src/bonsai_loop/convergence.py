@@ -2,11 +2,13 @@ from __future__ import annotations
 from tqdm import tqdm
 from typing import Literal
 from dataclasses import dataclass
+from collections import Counter
 from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode
 
 
 @dataclass
 class TreeNodeExtraData:
+    tree_node: TreeNode
     topological_level: int | None = None
     geometric_level: float | None = None
     identity: dict | None = None
@@ -27,6 +29,7 @@ class TreeNodeExtraData:
                 - B = 1
                 - A = 2 = level(B) + 1
         """
+
         levels = [
             child_node_data.topological_level + 1
             for child_node_data in node_data_children
@@ -38,7 +41,47 @@ class TreeNodeExtraData:
             self.topological_level = max(levels)
 
     def compute_identity(self, node_data_children: list[TreeNodeExtraData]) -> None:
-        pass
+        """
+        Helper function to compute node identity from its descendents (leaves).
+        For the current node, the function aggregates its children's identity compositions, weighted by the number of annotated leaves associated with each child.
+        This is equivalent to computing the identity composition of all annotated leaves associated with the current node.
+        """
+
+        if not node_data_children:
+            if not self.tree_node.isLeaf:
+                raise ValueError(
+                    f"node {self.tree_node.nodeId} has no child and it is not a leaf"
+                )
+            return
+
+        n_leaves: int | None = None
+        identity_count: Counter | None = None
+        for child_node_data in node_data_children:
+            if child_node_data is None:
+                continue
+            c_n_leaves = child_node_data.n_leaves
+            c_identity = child_node_data.identity
+            if c_identity is None or not c_identity:
+                continue
+            if c_n_leaves is None:
+                raise ValueError(
+                    f"node {child_node_data.tree_node.nodeId} has identity {c_identity}, but it is not associated with any leaves."
+                )
+            n_leaves = c_n_leaves if n_leaves is None else n_leaves + c_n_leaves
+            c_identity_count = Counter(
+                {k: v * c_n_leaves for k, v in c_identity.items()}
+            )
+            identity_count = (
+                c_identity_count
+                if identity_count is None
+                else identity_count + c_identity_count
+            )
+        if identity_count is not None and n_leaves is not None:
+            self.n_leaves = n_leaves
+            self.identity = {k: v / n_leaves for k, v in identity_count.items()}
+        else:
+            self.n_leaves = None
+            self.identity = None
 
 
 def compute_tree_node_level_and_label(
@@ -64,6 +107,8 @@ def compute_tree_node_level_and_label(
         │   ┌── F (dog, n = 1)
         └── E (50% dog, 50% cat, n = 2)
             └── G (cat, n = 1)
+    - if label_lookup_leaves is provided, leaves missing from it are treated as unknown and are excluded from internal
+      identity and n_leaves aggregation.
     - to be implemented: a better version might also consider edge length, make node level geometric
     Steps:
     1. do DFS to order the computation
@@ -102,13 +147,14 @@ def compute_tree_node_level_and_label(
                 else None
             )
             node_data = TreeNodeExtraData(
+                tree_node=node,
                 topological_level=0,
                 geometric_level=0.0,
                 identity={node_label: 1.0} if node_label is not None else None,
                 n_leaves=1,
             )
         else:
-            node_data = TreeNodeExtraData()
+            node_data = TreeNodeExtraData(tree_node=node)
         node_data_lookup[node.nodeId] = node_data
 
         for child_node in node.childNodes:
