@@ -8,26 +8,50 @@ from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode
 
 @dataclass
 class TreeNodeExtraData:
+    """A container to store additional properties for each node (root, internal, or
+    leaf)
+
+    Attributes
+    ----------
+    tree_node : bonsai.bonsai_treeHelpers.TreeNode
+        The Bonsai node associated with this extra data.
+    topological_level : int | None
+        Node level measured by topology, with leaves at level 0 and internal nodes increasing toward the root.
+    geometric_level : float | None
+        Node level measured by Bonsai edge length rather than edge count.
+    identity : dict | None
+        Label composition of annotated descendant leaves.
+    n_leaves : int | None
+        Number of annotated descendant leaves represented in identity.
+    phylogeny_position : float | None
+        The global position of the node in the Bonsai phylogenetic tree, with these potential versions:
+            - bonsai tree distance to a specific node (e.g. root)
+            - vertical distance in the dendrogram (e.g. nodes with fewer branches (more advanved) are placed higher)
+            - computed from its descendents
+    """
+
     tree_node: TreeNode
     topological_level: int | None = None
     geometric_level: float | None = None
     identity: dict | None = None
     n_leaves: int | None = None
+    phylogeny_position: float | None = None
 
     def compute_topological_level(
         self, node_data_children: list[TreeNodeExtraData]
     ) -> None:
-        """
-        Helper function to compute topological node level from the leaves (level = 0). Level increases toward the tree root.
-        When child sub-trees have different heights, compute their root's level using the substree with max height.
-            ┌── C
-            A   ┌── E
-            └── B
-                └── D
-            - Levels:
-                - C = E = D = 0
-                - B = 1
-                - A = 2 = level(B) + 1
+        """Helper function to compute topological node level from the leaves (level =
+        0). Level increases toward the tree root. When child sub-trees have different
+        heights, compute their root's level using the substree with max height.
+
+        ┌── C
+        A   ┌── E
+        └── B
+            └── D
+        - Levels:
+            - C = E = D = 0
+            - B = 1
+            - A = 2 = level(B) + 1
         """
 
         levels = [
@@ -41,10 +65,12 @@ class TreeNodeExtraData:
             self.topological_level = max(levels)
 
     def compute_identity(self, node_data_children: list[TreeNodeExtraData]) -> None:
-        """
-        Helper function to compute node identity from its descendents (leaves).
-        For the current node, the function aggregates its children's identity compositions, weighted by the number of annotated leaves associated with each child.
-        This is equivalent to computing the identity composition of all annotated leaves associated with the current node.
+        """Helper function to compute node identity from its descendents (leaves).
+
+        For the current node, the function aggregates its children's identity
+        compositions, weighted by the number of annotated leaves associated with each
+        child. This is equivalent to computing the identity composition of all annotated
+        leaves associated with the current node.
         """
 
         if not node_data_children:
@@ -117,7 +143,7 @@ def compute_tree_node_level_and_label(
 
     Parameters
     ----------
-    tree : Tree
+    tree : bonsai.bonsai_treeHelpers.Tree
         Bonsai tree defined in bonsai.bonsai_treeHelpers (e.g. reconstructed using loadReconstructedTreeAndData)
 
     Returns
