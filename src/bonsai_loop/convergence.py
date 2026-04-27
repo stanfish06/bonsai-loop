@@ -357,7 +357,22 @@ def compute_node_ordering(
             k: identity_ordering_value_sum[k] / identity_weight_sum[k]
             for k in identity_weight_sum
         }
-
+        """
+        Hierarchical node ordering:
+        1. First sort by identity-weighted ordering value. Nodes with identity use
+           (0, weighted_identity_ordering_value); nodes with no identity use (1, 0.0)
+           and are pushed to the end when ascending=True.
+        2. Within the same identity-ordering key, sort by node ordering_value. Nodes
+           with no ordering_value use (1, 0.0) and are pushed after nodes with valid
+           ordering_value.
+        The resulting order is:
+        [
+            identity-ordered nodes with ordering_value,
+            identity-ordered nodes without ordering_value,
+            no-identity nodes with ordering_value,
+            no-identity nodes without ordering_value,
+        ]
+        """
         node_data_items = sorted(
             node_data_items,
             key=lambda x: (
