@@ -44,3 +44,4 @@ exclude = [
   "Bonsai-data-representation",
   "Sanity",
 ]
+lint.per-file-ignores."src/bonsai_loop/bonsai_lib.py" = [ "E402" ]

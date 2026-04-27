@@ -34,12 +34,12 @@ from scipy.spatial.distance import squareform
 
 # import relevant functions for distance computation
 # pretend to be submodules of bonsai_lib
-from .bonsai_lib.downstream_analyses import (
+from .bonsai_lib.downstream_analyses import (  # type: ignore[import]
     get_clusters_max_diameter as bonsai_clustering,
 )
-from .bonsai_lib.bonsai.bonsai_dataprocessing import get_bonsai_euclidean_distances
-from .bonsai_lib.bonsai_scout.my_tree_layout import Layout_Tree
-from .bonsai_lib.bonsai_paper.simulating_datasets.analyzing_simulated_datasets.knn_recall_helpers import (
+from .bonsai_lib.bonsai.bonsai_dataprocessing import get_bonsai_euclidean_distances  # type: ignore[import]
+from .bonsai_lib.bonsai_scout.my_tree_layout import Layout_Tree  # type: ignore[import]
+from .bonsai_lib.bonsai_paper.simulating_datasets.analyzing_simulated_datasets.knn_recall_helpers import (  # type: ignore[import]
     get_pdists_on_tree,
 )
 

@@ -1,0 +1,22 @@
+name: format
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.9"
+
+      - run: make format-project
+
+      - name: fail if formatting changed files
+        run: |
+          git diff --exit-code || (echo "Run 'make format-project' locally and commit the result." && exit 1)

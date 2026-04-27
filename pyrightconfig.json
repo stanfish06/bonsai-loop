@@ -1,0 +1,6 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": ["Bonsai-data-representation"],
+  "exclude": ["Bonsai-data-representation", "Sanity", ".venv"]
+}
