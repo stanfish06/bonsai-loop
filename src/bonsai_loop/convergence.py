@@ -3,13 +3,15 @@ from tqdm import tqdm
 from typing import Literal
 from dataclasses import dataclass
 from collections import Counter
+import networkx as nx
+import pandas as pd
 from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode
 
 
 @dataclass
 class TreeNodeExtraData:
-    """A container to store additional properties for each node (root, internal, or
-    leaf)
+    """
+    A container to store additional properties for each node (root, internal, or leaf)
 
     Attributes
     ----------
@@ -28,6 +30,8 @@ class TreeNodeExtraData:
             - bonsai tree distance to a specific node (e.g. root)
             - vertical distance in the dendrogram (e.g. nodes with fewer branches (more advanved) are placed higher)
             - computed from its descendents
+    other_props: dict | None
+        Other non-essential properties
     """
 
     tree_node: TreeNode
@@ -36,12 +40,14 @@ class TreeNodeExtraData:
     identity: dict | None = None
     n_leaves: int | None = None
     ordering_value: float | None = None
+    other_props: dict | None = None
 
     def compute_topological_level(
         self, node_data_children: list[TreeNodeExtraData]
     ) -> None:
-        """Helper function to compute topological node level from the leaves (level =
-        0). Level increases toward the tree root. When child sub-trees have different
+        """
+        Helper function to compute topological node level from the leaves (level = 0).
+        Level increases toward the tree root. When child sub-trees have different
         heights, compute their root's level using the substree with max height.
 
         ┌── C
@@ -65,7 +71,8 @@ class TreeNodeExtraData:
             self.topological_level = max(levels)
 
     def compute_identity(self, node_data_children: list[TreeNodeExtraData]) -> None:
-        """Helper function to compute node identity from its descendents (leaves).
+        """
+        Helper function to compute node identity from its descendents (leaves).
 
         For the current node, the function aggregates its children's identity
         compositions, weighted by the number of annotated leaves associated with each
@@ -113,16 +120,59 @@ class TreeNodeExtraData:
 def compute_node_ordering_value(
     tree: Tree,
     node_data_lookup: dict[str, TreeNodeExtraData],
-    metric: Literal["bonsai_t_to_root", "dendrogram"],
+    metric: Literal["bonsai_t_to_root", "dendrogram"] = "bonsai_t_to_root",
     aggregate_metric_from_leaves: bool = False,
 ) -> None:
-    pass
+    if metric == "dendrogram":
+        raise NotImplementedError(f"no impl for subroutine {metric}")
+    if aggregate_metric_from_leaves:
+        raise NotImplementedError("no impl for subroutine aggregate metric from leaves")
+    print(f"compute node ordering using metric {metric}")
+    if metric == "bonsai_t_to_root":
+        root_node: TreeNode = tree.root
+        edge_df: pd.DataFrame = tree.get_edge_dataframe()
+        G = nx.from_pandas_edgelist(
+            df=edge_df, source="source", target="target", edge_attr="dist"
+        )
+        tree_dists_to_root = nx.shortest_path_length(
+            G, source=root_node.nodeId, weight="dist"
+        )
+        for node_id, node_data in node_data_lookup.items():
+            node_data.ordering_value = (
+                tree_dists_to_root[node_id] if node_id in tree_dists_to_root else None
+            )
 
 
 def compute_node_ordering(
     node_data_lookup: dict[str, TreeNodeExtraData],
+    level: int = -1,
+    sort_by_identity_first: bool = True,
+    ascending: bool = True,
 ) -> list[str]:
-    return []
+    """
+    Compute node ordering globally or for one specific level based on
+    TreeNodeExtraData.ordering_value.
+
+    Parameters
+    ----------
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        A map from node id to TreeNodeExtraData with valid ordering_value
+    level : int
+        The level (from leaves) to compute the ordering. The default is -1, meaning all nodes in the tree.
+    sort_by_identity_first : bool
+        Whether to sort by the mean ordering_value of the identity before each node's ordering_value.
+        Default is True, which might be helpful to group similar nodes.
+    ascending : bool
+        Sort by increasing or decreasing ordering_value
+
+    Returns
+    -------
+    node_ids_ordered : list[str]
+        A list of ordered node ids
+    """
+    node_ids_ordered = []
+
+    return node_ids_ordered
 
 
 def compute_tree_node_level_and_label(
@@ -131,7 +181,7 @@ def compute_tree_node_level_and_label(
     label_lookup_leaves: dict | None = None,
 ) -> dict[str, TreeNodeExtraData]:
     """
-    Compute the tree topology level and label of each node.
+    Compute the tree topology/geometric level and label of each node.
     - tree is likely imbalanced, so resolve level with the deepest substree.
         ┌── C
         A   ┌── E
@@ -167,7 +217,7 @@ def compute_tree_node_level_and_label(
     a map: TreeNode.nodeId → TreeNodeExtraData
     """
     if node_level_type == "geometric":
-        raise NotImplementedError("not ready")
+        raise NotImplementedError(f"no impl for subroutine {node_level_type}")
     node_data_lookup = {}
 
     print("compute depth-first ordering of nodes")
