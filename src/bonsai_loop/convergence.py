@@ -125,6 +125,25 @@ def compute_node_ordering_value(
     metric: Literal["bonsai_t_to_root", "dendrogram"] = "bonsai_t_to_root",
     aggregate_metric_from_leaves: bool = False,
 ) -> None:
+    """
+    Compute a 1D ordering value for each node.
+
+    The ordering value is stored in TreeNodeExtraData.ordering_value and can be used
+    later to order nodes within a level for visualization.
+
+    Parameters
+    ----------
+    tree : bonsai.bonsai_treeHelpers.Tree
+        Bonsai tree used to compute ordering values.
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        A map from TreeNode.nodeId to TreeNodeExtraData.
+    metric : {"bonsai_t_to_root", "dendrogram"}
+        The metric used to compute ordering_value. Currently, "bonsai_t_to_root"
+        computes Bonsai tree distance from the root using tParent edge lengths.
+    aggregate_metric_from_leaves : bool
+        Whether to compute internal node ordering values by aggregating leaf ordering
+        values.
+    """
     if metric == "dendrogram":
         raise NotImplementedError(f"no impl for subroutine {metric}")
     if aggregate_metric_from_leaves:
@@ -338,6 +357,29 @@ def get_pdists_on_tree_by_level(
     type: Literal["bonsai_t", "euclidean"] = "bonsai_t",
     level: int = 0,
 ) -> tuple[np.ndarray, list[str]]:
+    """
+    Compute pairwise distances on the Bonsai tree for nodes at one topological level.
+
+    Parameters
+    ----------
+    tree : bonsai.bonsai_treeHelpers.Tree
+        Bonsai tree used to compute shortest-path distances.
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        A map from TreeNode.nodeId to TreeNodeExtraData with valid topological_level.
+    type : {"bonsai_t", "euclidean"}
+        The edge weight used for shortest-path distances:
+            - "bonsai_t": use Bonsai tParent edge lengths
+            - "euclidean": use squared Euclidean distances between posterior node coordinates
+    level : int
+        The topological level from leaves used to select nodes.
+
+    Returns
+    -------
+    dists : np.ndarray
+        Pairwise distances in scipy condensed pdist format.
+    node_ids : list[str]
+        Node ids corresponding to the order used in dists.
+    """
     node_ids = [
         node_id
         for node_id, node_data in node_data_lookup.items()
@@ -370,6 +412,26 @@ def get_pdists_embedding_by_level(
     node_data_lookup: dict[str, TreeNodeExtraData],
     level: int = 0,
 ) -> tuple[np.ndarray, list[str]]:
+    """
+    Compute straight-line pairwise distances for nodes at one topological level.
+
+    Distances are squared Euclidean distances between posterior node coordinates,
+    normalized by the number of dimensions.
+
+    Parameters
+    ----------
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        A map from TreeNode.nodeId to TreeNodeExtraData with valid topological_level.
+    level : int
+        The topological level from leaves used to select nodes.
+
+    Returns
+    -------
+    dists : np.ndarray
+        Pairwise distances in scipy condensed pdist format.
+    node_ids : list[str]
+        Node ids corresponding to the order used in dists.
+    """
     node_ids = [
         node_id
         for node_id, node_data in node_data_lookup.items()
@@ -378,4 +440,5 @@ def get_pdists_embedding_by_level(
     coords = np.array(
         [node_data_lookup[node_id].tree_node.ltqsAIRoot for node_id in node_ids]
     )
-    return pdist(coords, metric="sqeuclidean") / coords.shape[1], node_ids
+    dists = pdist(coords, metric="sqeuclidean") / coords.shape[1]
+    return dists, node_ids
