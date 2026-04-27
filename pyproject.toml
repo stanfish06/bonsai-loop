@@ -39,6 +39,7 @@ dependencies = [
 ]
 
 [tool.ruff]
+line-length = 88
 exclude = [
   "Bonsai-data-representation",
   "Sanity",
