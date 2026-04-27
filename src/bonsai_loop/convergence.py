@@ -45,15 +45,25 @@ class TreeNodeExtraData:
     other_props: dict | None = None
 
     def __repr__(self) -> str:
+        def _print_identity(identity: dict | None, top_n: int = 3) -> str:
+            if not identity:
+                return "{}"
+            top = sorted(identity.items(), key=lambda kv: -kv[1])[:top_n]
+            parts = [f"({k},{round(v, 2)})" for k, v in top]
+            if len(identity) > top_n:
+                parts.append("...")
+            return "[" + ", ".join(parts) + "]"
+
         attrs = {
             "tree_node": f"TreeNode(nodeId={self.tree_node.nodeId!r})",
             "topological_level": self.topological_level,
             "geometric_level": self.geometric_level,
-            "identity": self.identity,
+            "identity": _print_identity(self.identity, top_n=3),
             "n_leaves": self.n_leaves,
             "ordering_value": self.ordering_value,
             "other_props": self.other_props,
         }
+
         key_width = max(len(k) for k in attrs)
         value_width = max(len(str(v)) for v in attrs.values())
         top = f"┌{'─' * (key_width + 2)}┬{'─' * (value_width + 2)}┐"
