@@ -39,6 +39,8 @@ class TreeNodeExtraData:
             - bonsai tree distance to a specific node (e.g. root)
             - vertical distance in the dendrogram (e.g. nodes with fewer branches (more advanved) are placed higher)
             - computed from its descendents
+    delta_deviation_from_parent : dict[str, float] | None
+        Delta deviation scores for the incoming branch parent -> current node, indexed by reference node id.
     other_props: dict | None
         Other non-essential properties
     """
@@ -50,6 +52,7 @@ class TreeNodeExtraData:
     n_leaves: int | None = None
     ordering_value: float | None = None
     dendrogram_coords: tuple[float, float] | None = None
+    delta_deviation_from_parent: dict[str, float] | None = None
     other_props: dict | None = None
 
     def __repr__(self) -> str:
@@ -62,6 +65,9 @@ class TreeNodeExtraData:
                 parts.append("...")
             return "[" + ", ".join(parts) + "]"
 
+        def _print_dict_summary(value: dict | None) -> str:
+            return "None" if value is None else f"dict(n={len(value)})"
+
         attrs = {
             "tree_node": f"TreeNode(nodeId={self.tree_node.nodeId!r})",
             "topological_level": self.topological_level,
@@ -70,6 +76,9 @@ class TreeNodeExtraData:
             "n_leaves": self.n_leaves,
             "ordering_value": self.ordering_value,
             "dendrogram_coords": self.dendrogram_coords,
+            "delta_deviation_from_parent": _print_dict_summary(
+                self.delta_deviation_from_parent
+            ),
             "other_props": self.other_props,
         }
 
@@ -155,6 +164,26 @@ class TreeNodeExtraData:
         else:
             self.n_leaves = None
             self.identity = None
+
+    def compute_delta_deviation_from_parent(
+        self, reference_nodes: list[TreeNode], normalize_by_branch_length: bool = False
+    ) -> None:
+        """Compute delta deviation scores for the incoming branch parent -> current
+        node."""
+        if self.tree_node.isRoot or self.tree_node.parentNode is None:
+            self.delta_deviation_from_parent = None
+            return
+
+        delta_deviation_from_parent = {}
+        for node in reference_nodes:
+            delta_d = compute_delta_deviation_score(
+                node_child=self.tree_node,
+                node_parent=self.tree_node.parentNode,
+                node_reference=node,
+                normalize_by_branch_length=normalize_by_branch_length,
+            )
+            delta_deviation_from_parent[node.nodeId] = delta_d
+        self.delta_deviation_from_parent = delta_deviation_from_parent
 
 
 def compute_bonsai_tree_dendrogram(
@@ -615,7 +644,10 @@ def get_pdists_embedding_by_level(
 
 
 def compute_delta_deviation_score(
-    node_parent: TreeNode, node_child: TreeNode, node_reference: TreeNode
+    node_parent: TreeNode,
+    node_child: TreeNode,
+    node_reference: TreeNode,
+    normalize_by_branch_length: bool = False,
 ) -> float:
     """
     Compute delta deviation (D_{xz} - D_{xy}) for branch y-z with respect to an arbitrary node x (Came up by Daan):
@@ -641,6 +673,8 @@ def compute_delta_deviation_score(
         Child node z of the branch y-z.
     node_reference : bonsai.bonsai_treeHelpers.TreeNode
         Reference node x for computing delta deviation with respect to branch y-z.
+    normalize_by_branch_length : bool
+        Whether to normalize delta deviation by the Bonsai branch length tParent of node_child.
 
     Returns
     -------
@@ -650,3 +684,14 @@ def compute_delta_deviation_score(
     delta_deviation = 0.0
 
     return delta_deviation
+
+
+# module level helper that computes the delta deviation for each parent-child branch across reference_node_ids
+# potentially make inner call(s) jitted
+def compute_delta_deviation_from_parent(
+    tree: Tree,
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    reference_node_ids: list[str] | None = None,
+    normalize_by_branch_length: bool = False,
+) -> None:
+    pass
