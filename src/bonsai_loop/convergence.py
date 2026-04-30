@@ -620,8 +620,8 @@ def compute_delta_deviation_score(
     """
     Compute delta deviation (D_{xz} - D_{xy}) for branch y-z with respect to an arbitrary node x (Came up by Daan):
         y ── z
-        ⋱ ⋰
-          x
+         ⋱ ⋰
+           x
 
         - here we consider a triplet of nodes where z is y's direct child, and x is an arbitrary node other than y and z
         - one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
