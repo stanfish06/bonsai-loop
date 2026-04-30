@@ -612,3 +612,41 @@ def get_pdists_embedding_by_level(
     )
     dists = pdist(coords, metric="sqeuclidean") / coords.shape[1]
     return dists, node_ids
+
+
+def compute_delta_deviation_score(
+    node_parent: TreeNode, node_child: TreeNode, node_reference: TreeNode
+) -> float:
+    """
+    Compute delta deviation (D_{xz} - D_{xy}) for branch y-z with respect to an arbitrary node x (Came up by Daan):
+        y ── z
+        ⋱ ⋰
+          x
+
+        - here we consider a triplet of nodes where z is y's direct child, and x is an arbitrary node other than y and z
+        - one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
+            - D_{xz} - D_{xy} = ‖z - y‖^2 (the difference between tree paths x-z and x-y) - ‖x - z‖^2 + ‖x - y‖^2
+                              = (z - y)^t(z - y) - (x - z)^t(x - z) + (x - y)^t(x - y)
+                              = z^tz - 2y^tz + y^ty - x^tx + 2x^tz - z^tz + x^tx - 2x^ty + y^ty
+                              = 2(y^ty - y^tz + x^tz - x^ty)
+                              = 2(x - y)^t(z - y)
+            - This means a more positive value corresponds to a smaller angle between vector (x - y) and (z - y),
+              indicating a stronger convergence between x and z.
+
+    Parameters
+    ----------
+    node_parent : bonsai.bonsai_treeHelpers.TreeNode
+        Parent node y of the branch y-z.
+    node_child : bonsai.bonsai_treeHelpers.TreeNode
+        Child node z of the branch y-z.
+    node_reference : bonsai.bonsai_treeHelpers.TreeNode
+        Reference node x for computing delta deviation with respect to branch y-z.
+
+    Returns
+    -------
+    delta_deviation : float
+        The change of deviation score from node_parent to node_child with respect to node_reference
+    """
+    delta_deviation = 0.0
+
+    return delta_deviation
