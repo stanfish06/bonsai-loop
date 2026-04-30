@@ -667,6 +667,40 @@ class _DeltaDeviationRow(Mapping[str, float]):
         return self._row
 
 
+def quantile_matching(
+    dists: list[np.ndarray], quantiles: list[float]
+) -> list[np.ndarray]:
+    """
+    Helper function for quantile matching.
+
+    Parameters
+    ----------
+    param_name : type
+    Description of parameter.
+
+    Returns
+    -------
+    return_type
+    Description of return value.
+    """
+    lo_pct, up_pct = quantiles
+    dists_quantiles = []
+    for dist in dists:
+        dists_quantiles.append(np.quantile(dist, [lo_pct, up_pct]))
+    dists_match = [dists[0]]
+    for i, dist in enumerate(dists[1:]):
+        dists_match.append(
+            np.maximum(
+                (dist - dists_quantiles[i + 1][0])
+                / (dists_quantiles[i + 1][1] - dists_quantiles[i + 1][0])
+                * (dists_quantiles[0][1] - dists_quantiles[0][0])
+                + dists_quantiles[0][0],
+                0,
+            )
+        )
+    return dists_match
+
+
 # TODO: need quantile global matching of euclidean tree path and embedding distances
 def compute_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
