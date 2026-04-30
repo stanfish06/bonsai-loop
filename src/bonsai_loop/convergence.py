@@ -42,8 +42,7 @@ class TreeNodeExtraData:
             - computed from its descendents
     delta_deviation_from_parent : Mapping[str, float] | None
         Delta deviation scores for the incoming branch parent -> current node, indexed by reference node id
-        (or by integer column index). Backed by a `_DeltaDeviationRow` view that shares memory with the
-        full ΔD matrix computed by `compute_delta_deviation_from_parent`.
+        (or by integer column index).
     other_props: dict | None
         Other non-essential properties
     """
@@ -668,6 +667,7 @@ class _DeltaDeviationRow(Mapping[str, float]):
         return self._row
 
 
+# TODO: need quantile global matching of euclidean tree path and embedding distances
 def compute_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
     reference_node_ids: list[str] | None = None,
