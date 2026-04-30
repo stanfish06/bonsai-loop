@@ -122,7 +122,6 @@ class TreeNodeExtraData:
         child. This is equivalent to computing the identity composition of all annotated
         leaves associated with the current node.
         """
-
         if not node_data_children:
             if not self.tree_node.isLeaf:
                 raise ValueError(
@@ -188,6 +187,7 @@ def compute_bonsai_tree_dendrogram(
     None
         Dendrogram coordinates are stored in TreeNodeExtraData.dendrogram_coords.
     """
+    # TODO: adapt Bonsai's branching flipping algorithms here
     xlims = (-0.95, 0.95)
     ylims = (-0.95, 0.95)
 
