@@ -3,6 +3,7 @@ from tqdm import tqdm
 from typing import Literal
 from dataclasses import dataclass
 from collections import Counter
+from collections.abc import Mapping
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -39,8 +40,10 @@ class TreeNodeExtraData:
             - bonsai tree distance to a specific node (e.g. root)
             - vertical distance in the dendrogram (e.g. nodes with fewer branches (more advanved) are placed higher)
             - computed from its descendents
-    delta_deviation_from_parent : dict[str, float] | None
-        Delta deviation scores for the incoming branch parent -> current node, indexed by reference node id.
+    delta_deviation_from_parent : Mapping[str, float] | None
+        Delta deviation scores for the incoming branch parent -> current node, indexed by reference node id
+        (or by integer column index). Backed by a `_DeltaDeviationRow` view that shares memory with the
+        full ΔD matrix computed by `compute_delta_deviation_from_parent`.
     other_props: dict | None
         Other non-essential properties
     """
@@ -52,7 +55,9 @@ class TreeNodeExtraData:
     n_leaves: int | None = None
     ordering_value: float | None = None
     dendrogram_coords: tuple[float, float] | None = None
-    delta_deviation_from_parent: dict[str, float] | None = None
+    delta_deviation_from_parent: Mapping[str, float] | None = (
+        None  # TODO: functions to summarize/aggregate across reference nodes
+    )
     other_props: dict | None = None
 
     def __repr__(self) -> str:
@@ -65,7 +70,7 @@ class TreeNodeExtraData:
                 parts.append("...")
             return "[" + ", ".join(parts) + "]"
 
-        def _print_dict_summary(value: dict | None) -> str:
+        def _print_dict_summary(value: Mapping | None) -> str:
             return "None" if value is None else f"dict(n={len(value)})"
 
         attrs = {
@@ -164,26 +169,6 @@ class TreeNodeExtraData:
         else:
             self.n_leaves = None
             self.identity = None
-
-    def compute_delta_deviation_from_parent(
-        self, reference_nodes: list[TreeNode], normalize_by_branch_length: bool = False
-    ) -> None:
-        """Compute delta deviation scores for the incoming branch parent -> current
-        node."""
-        if self.tree_node.isRoot or self.tree_node.parentNode is None:
-            self.delta_deviation_from_parent = None
-            return
-
-        delta_deviation_from_parent = {}
-        for node in reference_nodes:
-            delta_d = compute_delta_deviation_score(
-                node_child=self.tree_node,
-                node_parent=self.tree_node.parentNode,
-                node_reference=node,
-                normalize_by_branch_length=normalize_by_branch_length,
-            )
-            delta_deviation_from_parent[node.nodeId] = delta_d
-        self.delta_deviation_from_parent = delta_deviation_from_parent
 
 
 def compute_bonsai_tree_dendrogram(
@@ -643,76 +628,151 @@ def get_pdists_embedding_by_level(
     return dists, node_ids
 
 
-def compute_delta_deviation_score(
-    node_parent: TreeNode,
-    node_child: TreeNode,
-    node_reference: TreeNode,
-    normalize_by_branch_length: bool = False,
-) -> float:
+class _DeltaDeviationRow(Mapping[str, float]):
     """
-    Compute delta deviation (D_{xz} - D_{xy}) for branch y-z with respect to an arbitrary node x (Came up by Daan):
-        y ── z
-         ⋱ ⋰
-           x
+    Read-only dict-like view over a single row of a shared ΔD matrix.
 
-        - here we consider a triplet of nodes where z is y's direct child, and x is an arbitrary node other than y and z
-        - one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
-            - D_{xz} - D_{xy} = ‖z - y‖^2 (the difference between tree paths x-z and x-y) - ‖x - z‖^2 + ‖x - y‖^2
-                              = (z - y)^t(z - y) - (x - z)^t(x - z) + (x - y)^t(x - y)
-                              = z^tz - 2y^tz + y^ty - x^tx + 2x^tz - z^tz + x^tx - 2x^ty + y^ty
-                              = 2(y^ty - y^tz + x^tz - x^ty)
-                              = 2(x - y)^t(z - y)
-            - This means a more positive value corresponds to a smaller angle between vector (x - y) and (z - y),
-              indicating a stronger convergence between x and z.
-        - optionally, normalize (D_{xz} - D_{xy}) by the branch length between y and z
-
-    Parameters
-    ----------
-    node_parent : bonsai.bonsai_treeHelpers.TreeNode
-        Parent node y of the branch y-z.
-    node_child : bonsai.bonsai_treeHelpers.TreeNode
-        Child node z of the branch y-z.
-    node_reference : bonsai.bonsai_treeHelpers.TreeNode
-        Reference node x for computing delta deviation with respect to branch y-z.
-    normalize_by_branch_length : bool
-        Whether to normalize delta deviation by the Bonsai branch length tParent of node_child.
-
-    Returns
-    -------
-    delta_deviation : float
-        The change of deviation score from node_parent to node_child with respect to node_reference
+    Indexing accepts either:
+        - str: reference node id  -> ΔD for that reference
+        - int: positional column  -> ΔD for the i-th reference
     """
-    delta_deviation: float = 0.0
-    ndims: int = len(node_parent.ltqsAIRoot)
-    coords_parent: np.ndarray = node_parent.ltqsAIRoot / np.sqrt(ndims)
-    coords_child: np.ndarray = node_child.ltqsAIRoot / np.sqrt(ndims)
-    coords_reference: np.ndarray = node_reference.ltqsAIRoot / np.sqrt(ndims)
-    delta_deviation = 2 * np.dot(
-        (coords_reference - coords_parent), (coords_child - coords_parent)
-    )
-    delta_deviation /= float(node_child.tParent) if normalize_by_branch_length else 1.0
 
-    return delta_deviation
+    __slots__ = ("_row", "_ref_ids", "_ref_index")
+
+    def __init__(
+        self,
+        row: np.ndarray,
+        ref_ids: list[str],
+        ref_index: dict[str, int],
+    ) -> None:
+        self._row = row
+        self._ref_ids = ref_ids
+        self._ref_index = ref_index
+
+    def __getitem__(self, key: str | int) -> float:
+        if isinstance(key, (int, np.integer)):
+            try:
+                return float(self._row[key])
+            except IndexError as e:
+                raise KeyError(key) from e
+        return float(self._row[self._ref_index[key]])
+
+    def __iter__(self):
+        return iter(self._ref_ids)
+
+    def __len__(self) -> int:
+        return len(self._ref_ids)
+
+    def to_array(self) -> np.ndarray:
+        """Return the underlying row as a numpy view into the shared ΔD matrix."""
+        return self._row
 
 
-# module level helper that computes the delta deviation for each parent-child branch across reference_node_ids
-# potentially make inner call(s) jitted
 def compute_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
     reference_node_ids: list[str] | None = None,
     normalize_by_branch_length: bool = False,
 ) -> None:
-    reference_nodes = (
-        [node_data_lookup[node_id].tree_node for node_id in reference_node_ids]
-        if reference_node_ids is not None
-        else [node_data.tree_node for node_data in node_data_lookup.values()]
+    """
+    Compute delta deviation scores ΔD for every parent→child branch against every
+    reference node.
+
+    An example triplet of a parent (y), child (z), and reference node (x):
+        y ── z
+         ⋱ ⋰
+           x
+    - one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
+        - D_{xz} - D_{xy} = ‖z - y‖^2 (the difference between tree paths x⇔z and x⇔y) - ‖x - z‖^2 + ‖x - y‖^2
+                            = (z - y)^t(z - y) - (x - z)^t(x - z) + (x - y)^t(x - y)
+                            = z^tz - 2y^tz + y^ty - x^tx + 2x^tz - z^tz + x^tx - 2x^ty + y^ty
+                            = 2(y^ty - y^tz + x^tz - x^ty)
+                            = 2(x - y)^t(z - y)
+        - This means a more positive value corresponds to a smaller angle between vector (x - y) and (z - y),
+            indicating a stronger convergence between x and z.
+    - optionally, normalize (D_{xz} - D_{xy}) by the branch length between y and z
+    - this function computes all requested branch-reference pairs. For downstream
+      score aggregation, we should probably mask reference nodes that are the parent y, the child z, descendants of z, or ancestors of y.
+        - x = z → D_{xz} - D_{xy} = 2‖z - y‖^2, positive artifact
+        - x = y → D_{xz} - D_{xy} = 0, 0 artifact
+        - x being a descendant of z or an ancestor of y, which could potentially detect cycles (e.g. x loop back to z despite being descendant of z)
+            - out of scope for now
+
+    Steps:
+        0. Matrices:
+            - X_m×p: m reference nodes, each with p features/genes
+            - Y_n×p: n parent nodes, each with p features/genes
+            - Z_n×p: n child nodes, each with p features/genes
+            - all matrices will be first divided by sqrt(p)
+        1. V_n×p = Z_n×p - Y_n×p, where row pair i (Zi․, Yi․) represents branch/edge i between the parent yi and child zi
+        2. then, ΔD[i, j] (delta deviation for branch i with respect to reference node j) = 2 (Xj․− Yi․)^t · Vi․ = 2 Xj․^t · Vi․ − 2 Yi․^t · Vi․
+        3. to compute all 2 Yi․^t · Vi․, do row-wise dot product: 2.0 * np.einsum("ij,ij->i", Y, V), yielding 1d array with n elements
+        4. to compute all 2 Xj․^t · Vi․, do regular dot product: 2.0 * V @ X^t, yielding a n by m matrix
+        5. then subtract each column (each reference node) of 2.0 * V @ X^t with 2.0 * np.einsum("ij,ij->i", Y, V): 2.0 * V @ X^t - 2.0 * np.einsum("ij,ij->i", Y, V)[:, None]
+        6. finally get a n by m matrix ΔD
+
+    Parameters
+    ----------
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        Map from node id to TreeNodeExtraData. Each tree_node must expose
+        ltqsAIRoot, parentNode, tParent.
+    reference_node_ids : list[str] | None
+        Reference nodes used as columns (the "x" in ΔD). If None, all nodes in
+        node_data_lookup are used (asymmetric N × N matrix).
+    normalize_by_branch_length : bool
+        If True, divide row i by tParent of branch i.
+    """
+    # if reference node ids provided, use as is, otherwise use all node data map's keys
+    ref_ids = (
+        list(node_data_lookup)
+        if reference_node_ids is None
+        else list(reference_node_ids)
     )
-    print(
-        f"compute deviations for {len(node_data_lookup)}x{len(reference_nodes)} triplets"
+    ref_index = {rid: i for i, rid in enumerate(ref_ids)}
+
+    # from the node data map, we obtain tuple (child node id, child node object, parent node object)
+    branch_nodes: list[tuple[str, TreeNode, TreeNode]] = [
+        (nid, nd.tree_node, nd.tree_node.parentNode)
+        for nid, nd in node_data_lookup.items()
+        if not nd.tree_node.isRoot and nd.tree_node.parentNode is not None
+    ]
+
+    # reset delta deviation
+    for nd in node_data_lookup.values():
+        nd.delta_deviation_from_parent = None
+
+    print(f"compute deviations for {len(branch_nodes)} branches × {len(ref_ids)} refs")
+    if not branch_nodes:
+        return
+
+    inv_sqrt_d = 1.0 / np.sqrt(len(branch_nodes[0][1].ltqsAIRoot))
+    Z = (
+        np.stack([np.asarray(z.ltqsAIRoot, dtype=float) for _, z, _ in branch_nodes])
+        * inv_sqrt_d
+    )
+    Y = (
+        np.stack([np.asarray(y.ltqsAIRoot, dtype=float) for _, _, y in branch_nodes])
+        * inv_sqrt_d
+    )
+    V = Z - Y
+    X = (
+        np.stack(
+            [
+                np.asarray(node_data_lookup[rid].tree_node.ltqsAIRoot, dtype=float)
+                for rid in ref_ids
+            ]
+        )
+        * inv_sqrt_d
     )
 
-    for node_data in tqdm(node_data_lookup.values()):
-        node_data.compute_delta_deviation_from_parent(
-            reference_nodes=reference_nodes,
-            normalize_by_branch_length=normalize_by_branch_length,
+    delta_d = 2.0 * (V @ X.T) - 2.0 * np.einsum("ij,ij->i", Y, V)[:, None]
+
+    if normalize_by_branch_length:
+        t_parents = np.asarray(
+            [float(c.tParent) for _, c, _ in branch_nodes], dtype=float
+        )
+        delta_d /= t_parents[:, None]
+
+    for i, (nid, _, _) in enumerate(branch_nodes):
+        node_data_lookup[nid].delta_deviation_from_parent = _DeltaDeviationRow(
+            delta_d[i], ref_ids, ref_index
         )
