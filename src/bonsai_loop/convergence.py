@@ -664,6 +664,7 @@ def compute_delta_deviation_score(
                               = 2(x - y)^t(z - y)
             - This means a more positive value corresponds to a smaller angle between vector (x - y) and (z - y),
               indicating a stronger convergence between x and z.
+        - optionally, normalize (D_{xz} - D_{xy}) by the branch length between y and z
 
     Parameters
     ----------
@@ -681,7 +682,15 @@ def compute_delta_deviation_score(
     delta_deviation : float
         The change of deviation score from node_parent to node_child with respect to node_reference
     """
-    delta_deviation = 0.0
+    delta_deviation: float = 0.0
+    ndims: int = len(node_parent.ltqsAIRoot)
+    coords_parent: np.ndarray = node_parent.ltqsAIRoot / np.sqrt(ndims)
+    coords_child: np.ndarray = node_child.ltqsAIRoot / np.sqrt(ndims)
+    coords_reference: np.ndarray = node_reference.ltqsAIRoot / np.sqrt(ndims)
+    delta_deviation = 2 * np.dot(
+        (coords_reference - coords_parent), (coords_child - coords_parent)
+    )
+    delta_deviation /= float(node_child.tParent) if normalize_by_branch_length else 1.0
 
     return delta_deviation
 
@@ -689,9 +698,21 @@ def compute_delta_deviation_score(
 # module level helper that computes the delta deviation for each parent-child branch across reference_node_ids
 # potentially make inner call(s) jitted
 def compute_delta_deviation_from_parent(
-    tree: Tree,
     node_data_lookup: dict[str, TreeNodeExtraData],
     reference_node_ids: list[str] | None = None,
     normalize_by_branch_length: bool = False,
 ) -> None:
-    pass
+    reference_nodes = (
+        [node_data_lookup[node_id].tree_node for node_id in reference_node_ids]
+        if reference_node_ids is not None
+        else [node_data.tree_node for node_data in node_data_lookup.values()]
+    )
+    print(
+        f"compute deviations for {len(node_data_lookup)}x{len(reference_nodes)} triplets"
+    )
+
+    for node_data in tqdm(node_data_lookup.values()):
+        node_data.compute_delta_deviation_from_parent(
+            reference_nodes=reference_nodes,
+            normalize_by_branch_length=normalize_by_branch_length,
+        )
