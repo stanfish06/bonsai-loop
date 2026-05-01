@@ -6,6 +6,12 @@ resolution-markers = [
     "sys_platform == 'emscripten'",
 ]
 
+[manifest]
+build-constraints = [
+    { name = "blosc2", specifier = "<2.6.2" },
+    { name = "numpy", specifier = "<2" },
+]
+
 [[package]]
 name = "anndata"
 version = "0.10.9"

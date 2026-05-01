@@ -38,6 +38,13 @@ dependencies = [
   "tables==3.9.2",
 ]
 
+# this is needed in case need to build pytables locally (e.g. for arm)
+[tool.uv]
+build-constraint-dependencies = [
+  "blosc2<2.6.2",
+  "numpy<2",
+]
+
 [tool.ruff]
 line-length = 88
 exclude = [
