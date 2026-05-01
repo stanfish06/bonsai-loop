@@ -667,52 +667,17 @@ class _DeltaDeviationRow(Mapping[str, float]):
         return self._row
 
 
-def quantile_matching(
-    dists: list[np.ndarray], quantiles: list[float]
-) -> list[np.ndarray]:
-    """
-    Helper function for quantile matching.
-
-    Parameters
-    ----------
-    param_name : type
-    Description of parameter.
-
-    Returns
-    -------
-    return_type
-    Description of return value.
-    """
-    lo_pct, up_pct = quantiles
-    dists_quantiles = []
-    for dist in dists:
-        dists_quantiles.append(np.quantile(dist, [lo_pct, up_pct]))
-    dists_match = [dists[0]]
-    for i, dist in enumerate(dists[1:]):
-        dists_match.append(
-            np.maximum(
-                (dist - dists_quantiles[i + 1][0])
-                / (dists_quantiles[i + 1][1] - dists_quantiles[i + 1][0])
-                * (dists_quantiles[0][1] - dists_quantiles[0][0])
-                + dists_quantiles[0][0],
-                0,
-            )
-        )
-    return dists_match
-
-
-# TODO: need quantile global matching of euclidean tree path and embedding distances
 def compute_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
     reference_node_ids: list[str] | None = None,
-    normalize_by_branch_length: bool = False,
+    normalize_by_branch_length: bool = True,
 ) -> None:
     """
     Compute delta deviation scores ΔD for every parent→child branch against every
     reference node.
 
     An example triplet of a parent (y), child (z), and reference node (x):
-        y ── z
+        y ─── z
          ⋱ ⋰
            x
     - one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
@@ -801,6 +766,7 @@ def compute_delta_deviation_from_parent(
     delta_d = 2.0 * (V @ X.T) - 2.0 * np.einsum("ij,ij->i", Y, V)[:, None]
 
     if normalize_by_branch_length:
+        print("normalize delta deviation by branch length")
         t_parents = np.asarray(
             [float(c.tParent) for _, c, _ in branch_nodes], dtype=float
         )
