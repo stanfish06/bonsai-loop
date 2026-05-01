@@ -1,6 +1,6 @@
 from __future__ import annotations
 from tqdm import tqdm
-from typing import Literal
+from typing import Literal, cast
 from dataclasses import dataclass
 from collections import Counter
 from collections.abc import Mapping
@@ -54,9 +54,7 @@ class TreeNodeExtraData:
     n_leaves: int | None = None
     ordering_value: float | None = None
     dendrogram_coords: tuple[float, float] | None = None
-    delta_deviation_from_parent: Mapping[str, float] | None = (
-        None  # TODO: functions to summarize/aggregate across reference nodes
-    )
+    delta_deviation_from_parent: Mapping[str, float] | None = None
     other_props: dict | None = None
 
     def __repr__(self) -> str:
@@ -776,3 +774,73 @@ def compute_delta_deviation_from_parent(
         node_data_lookup[nid].delta_deviation_from_parent = _DeltaDeviationRow(
             delta_d[i], ref_ids, ref_index
         )
+
+
+def aggregate_delta_deviation_from_parent(
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    method: Literal["sum", "abs_sum", "mean", "abs_mean"] = "sum",
+    mask_irelevent_reference_nodes: bool = False,
+) -> dict[str, float]:
+    """
+    Aggregate delta deviation scores ΔD across reference nodes for each branch.
+
+    For a parent→child branch y→z, ΔD[y→z, x] (computed by
+    compute_delta_deviation_from_parent) gives a score per reference node x.
+    This function collapses that per-reference row to a single score per branch,
+    so each branch can be visualized as one color (e.g. on the Bonsai tree, by
+    coloring the downstream/child node z).
+
+    Parameters
+    ----------
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        A map from TreeNode.nodeId to TreeNodeExtraData with delta_deviation_from_parent
+        populated by compute_delta_deviation_from_parent.
+    method : {"sum", "abs_sum", "mean", "abs_mean"}
+        Aggregation across reference nodes:
+            - "sum": Σ ΔD (signed; captures directional convergence but positive
+              and negative values can cancel)
+            - "abs_sum": Σ |ΔD| (avoids cancellation)
+            - "mean": mean of ΔD over reference nodes
+            - "abs_mean": mean of |ΔD| over reference nodes
+    mask_irelevent_reference_nodes : bool
+        If True, exclude irrelevant references before aggregation:
+            - x = z (the child) → ΔD = 2‖z - y‖^2 (positive artifact)
+            - x = y (the parent) → ΔD = 0 (zero artifact)
+            - x descendant of z or ancestor of y (potential cycle artifacts)
+        Not implemented yet.
+
+    Returns
+    -------
+    aggregated_scores : dict[str, float]
+        A map from the branch's downstream/child node id to the aggregated ΔD
+        score. Keys are the same as keys in node_data_lookup, restricted to
+        non-root nodes whose delta_deviation_from_parent is set.
+    """
+    if mask_irelevent_reference_nodes:
+        raise NotImplementedError(
+            "no impl for subroutine mask irelevent reference nodes"
+        )
+
+    branches = [
+        (nid, nd)
+        for nid, nd in node_data_lookup.items()
+        if nd.delta_deviation_from_parent is not None
+    ]
+    if not branches:
+        return {}
+
+    delta_d = np.stack(
+        [
+            cast(_DeltaDeviationRow, nd.delta_deviation_from_parent).to_array()
+            for _, nd in branches
+        ]
+    )
+    if method.startswith("abs"):
+        delta_d = np.abs(delta_d)
+
+    if method in ("sum", "abs_sum"):
+        scores = delta_d.sum(axis=1)
+    else:
+        scores = delta_d.mean(axis=1)
+
+    return {nid: float(score) for (nid, _), score in zip(branches, scores)}
