@@ -678,7 +678,7 @@ def compute_delta_deviation_from_parent(
 
     An example triplet of a parent (y), child (z), and reference node (x):
         y ─── z
-         ⋱ ⋰
+         ⋱  ⋰
            x
     - one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
         - D_{xz} - D_{xy} = ‖z - y‖^2 (the difference between tree paths x⇔z and x⇔y) - ‖x - z‖^2 + ‖x - y‖^2
