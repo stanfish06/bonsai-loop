@@ -779,16 +779,17 @@ def compute_delta_deviation_from_parent(
 def aggregate_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
     method: Literal["sum", "abs_sum", "mean", "abs_mean"] = "sum",
+    axis: Literal["reference", "children", "parent"] = "reference",
     mask_irelevent_reference_nodes: bool = False,
 ) -> dict[str, float]:
     """
-    Aggregate delta deviation scores ΔD across reference nodes for each branch.
+    Aggregate delta deviation scores ΔD for each branch.
 
     For a parent→child branch y→z, ΔD[y→z, x] (computed by
     compute_delta_deviation_from_parent) gives a score per reference node x.
-    This function collapses that per-reference row to a single score per branch,
-    so each branch can be visualized as one color (e.g. on the Bonsai tree, by
-    coloring the downstream/child node z).
+    With axis="reference", this function collapses that per-reference row to a
+    single score per branch, so each branch can be visualized as one color
+    (e.g. on the Bonsai tree, by coloring the downstream/child node z).
 
     Parameters
     ----------
@@ -802,6 +803,11 @@ def aggregate_delta_deviation_from_parent(
             - "abs_sum": Σ |ΔD| (avoids cancellation)
             - "mean": mean of ΔD over reference nodes
             - "abs_mean": mean of |ΔD| over reference nodes
+    axis : {"reference", "children", "parent"}
+        Which dimension to aggregate over:
+            - "reference": aggregate each branch across reference nodes x
+            - "children": aggregate branches by child nodes z; not implemented yet
+            - "parent": aggregate branches by parent nodes y; not implemented yet
     mask_irelevent_reference_nodes : bool
         If True, exclude irrelevant references before aggregation:
             - x = z (the child) → ΔD = 2‖z - y‖^2 (positive artifact)
@@ -829,18 +835,29 @@ def aggregate_delta_deviation_from_parent(
     if not branches:
         return {}
 
-    delta_d = np.stack(
-        [
-            cast(_DeltaDeviationRow, nd.delta_deviation_from_parent).to_array()
-            for _, nd in branches
-        ]
-    )
-    if method.startswith("abs"):
-        delta_d = np.abs(delta_d)
+    def _get_delta_deviation_matrix() -> np.ndarray:
+        return np.stack(
+            [
+                cast(_DeltaDeviationRow, nd.delta_deviation_from_parent).to_array()
+                for _, nd in branches
+            ]
+        )
 
-    if method in ("sum", "abs_sum"):
-        scores = delta_d.sum(axis=1)
-    else:
-        scores = delta_d.mean(axis=1)
+    if axis in ("children", "parent"):
+        _get_delta_deviation_matrix()
+        raise NotImplementedError(
+            f"no impl for subroutine aggregate delta deviation by {axis}"
+        )
 
-    return {nid: float(score) for (nid, _), score in zip(branches, scores)}
+    aggregated_scores = {}
+    for nid, nd in branches:
+        values = cast(_DeltaDeviationRow, nd.delta_deviation_from_parent).to_array()
+        if method.startswith("abs"):
+            values = np.abs(values)
+        if method in ("sum", "abs_sum"):
+            score = values.sum()
+        else:
+            score = values.mean()
+        aggregated_scores[nid] = float(score)
+
+    return aggregated_scores
