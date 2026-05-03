@@ -14,6 +14,14 @@ Two required packages (`Sanity` and `Bonsai-data-representation`) are included a
 git submodule update --init --recursive
 ```
 
+### System requirements
+
+PyTables (`tables`) builds from source on apple arm chip (might not have wheel):
+
+```bash
+brew install hdf5 c-blosc lzo bzip2
+```
+
 ### Install uv
 
 If uv is not already available:
