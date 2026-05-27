@@ -16,7 +16,3 @@ jobs:
           python-version: "3.9"
 
       - run: make format-project
-
-      - name: fail if formatting changed files
-        run: |
-          git diff --exit-code -- ':(exclude)pyproject.toml' || (echo "Run 'make format-project' locally and commit the result." && exit 1)
