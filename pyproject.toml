@@ -45,9 +45,9 @@ exclude = [
   "Bonsai-data-representation",
   "Sanity",
 ]
+# this is needed in case need to build pytables locally (e.g. for arm)
 lint.per-file-ignores."src/bonsai_loop/bonsai_lib.py" = [ "E402" ]
 
-# this is needed in case need to build pytables locally (e.g. for arm)
 [tool.uv]
 build-constraint-dependencies = [
   "blosc2<2.6.2",
