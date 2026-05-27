@@ -909,18 +909,22 @@ def delta_for_triplet(
 def accumulate_delta_deviation_scores_along_lineage(
     node_data_lookup: dict[str, TreeNodeExtraData],
     source_node_id: str,
+    reference_node_id: str,
     n_steps: int = 0,
     direction: Literal["up", "down"] = "up",
     target_node_id: str | None = None,
 ) -> tuple[float, str]:
     """
     Walk a lineage starting at source_node_id and accumulate signed ΔD scores,
-    recovering the absolute deviation score D(source, end).
+    all taken against a single fixed reference node reference_node_id.
 
-    The reference node is fixed to source_node_id, so by telescoping
-    (base case D(source, source) = 0) the accumulated value equals D(source, end):
-        - child -> parent (toward root): accumulate -ΔD stored on the child
-        - parent -> child (toward leaf): accumulate +ΔD stored on the child
+    Every step reads ΔD[branch, reference_node_id] (the same reference column),
+    so by telescoping the accumulated value equals
+        D(reference, end) - D(reference, source).
+    (When reference_node_id == source_node_id this reduces to D(source, end),
+    since D(source, source) = 0.)
+        - child -> parent (toward root): accumulate -ΔD[branch, reference]
+        - parent -> child (toward leaf): accumulate +ΔD[branch, reference]
 
     Two modes:
         - target_node_id is None: walk n_steps in `direction`.
@@ -928,7 +932,7 @@ def accumulate_delta_deviation_scores_along_lineage(
           n_steps and direction are ignored. (currently no check if lineage exists)
 
     Requires compute_delta_deviation_from_parent to have been run with
-    source_node_id among the reference nodes (e.g. reference_node_ids=None),
+    reference_node_id among the reference nodes (e.g. reference_node_ids=None),
     and normalize_by_branch_length=False (normalized ΔD cannot be accumulated to D).
 
     Parameters
@@ -936,7 +940,9 @@ def accumulate_delta_deviation_scores_along_lineage(
     node_data_lookup : dict[str, TreeNodeExtraData]
         Map from node id to TreeNodeExtraData with delta_deviation_from_parent set.
     source_node_id : str
-        Node where the walk starts; also the reference node x for every step.
+        Node where the walk starts.
+    reference_node_id : str
+        Reference node x held fixed for every step; the ΔD column accumulated.
     n_steps : int
         Number of branches to traverse when target_node_id is None.
     direction : {"up", "down"}
@@ -949,7 +955,8 @@ def accumulate_delta_deviation_scores_along_lineage(
     Returns
     -------
     accumulated_score : float
-        Σ signed ΔD over traversed branches == D(source_node_id, end_node_id).
+        Σ signed ΔD[·, reference] over traversed branches
+        == D(reference, end_node_id) - D(reference, source_node_id).
     end_node_id : str
         Node id reached at the end of the walk.
     """
@@ -969,7 +976,7 @@ def accumulate_delta_deviation_scores_along_lineage(
                     assert row is not None, (
                         f"delta_deviation_from_parent is None for node {c.nodeId}"
                     )
-                    accumulated_score -= row[source_node_id]
+                    accumulated_score -= row[reference_node_id]
                 return accumulated_score, target_node_id
             upward_lineage_nodes.append(node)
             node = node.parentNode
@@ -986,7 +993,7 @@ def accumulate_delta_deviation_scores_along_lineage(
             assert row is not None, (
                 f"delta_deviation_from_parent is None for node {c.nodeId}"
             )
-            accumulated_score += row[source_node_id]
+            accumulated_score += row[reference_node_id]
         return accumulated_score, target_node_id
 
     current: TreeNode = node_data_lookup[source_node_id].tree_node
@@ -1000,7 +1007,7 @@ def accumulate_delta_deviation_scores_along_lineage(
                 )
             row = node_data_lookup[current.nodeId].delta_deviation_from_parent
             assert row is not None
-            accumulated_score += -float(row[source_node_id])
+            accumulated_score += -float(row[reference_node_id])
             current = parent
         else:  # "down"
             # childNodes[0] for now.
@@ -1011,6 +1018,6 @@ def accumulate_delta_deviation_scores_along_lineage(
             child: TreeNode = current.childNodes[0]
             row = node_data_lookup[child.nodeId].delta_deviation_from_parent
             assert row is not None
-            accumulated_score += float(row[source_node_id])
+            accumulated_score += float(row[reference_node_id])
             current = child
     return accumulated_score, current.nodeId
