@@ -679,11 +679,15 @@ def compute_delta_deviation_from_parent(
          ⋱  ⋰
            x
     - one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
-        - D_{xz} - D_{xy} = ‖z - y‖^2 (the difference between tree paths x⇔z and x⇔y) - ‖x - z‖^2 + ‖x - y‖^2
-                            = (z - y)^t(z - y) - (x - z)^t(x - z) + (x - y)^t(x - y)
-                            = z^tz - 2y^tz + y^ty - x^tx + 2x^tz - z^tz + x^tx - 2x^ty + y^ty
-                            = 2(y^ty - y^tz + x^tz - x^ty)
-                            = 2(x - y)^t(z - y)
+        - D_{xy} = tree_d(x, y) - d(x, y)
+            - tree_d(x, y): summed squared euclidean distance along the tree path between node x and y (node x ⎯ closest common ancestor between x and y ⎯ node y)
+            - d(x, y): squared euclidean distance between node x and y
+        - D_{xz} - D_{xy} = [tree_d(x, z) - d(x, z)] - [tree_d(x, y) - d(x, y)]
+                          = ‖z - y‖^2 (the difference between tree paths x⇔z and x⇔y) - ‖x - z‖^2 + ‖x - y‖^2
+                          = (z - y)^t(z - y) - (x - z)^t(x - z) + (x - y)^t(x - y)
+                          = z^tz - 2y^tz + y^ty - x^tx + 2x^tz - z^tz + x^tx - 2x^ty + y^ty
+                          = 2(y^ty - y^tz + x^tz - x^ty)
+                          = 2(x - y)^t(z - y)
         - This means a more positive value corresponds to a smaller angle between vector (x - y) and (z - y),
             indicating a stronger convergence between x and z.
     - optionally, normalize (D_{xz} - D_{xy}) by the branch length between y and z
@@ -780,6 +784,7 @@ def aggregate_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
     method: Literal["sum", "abs_sum", "mean", "abs_mean"] = "sum",
     axis: Literal["reference", "children", "parent"] = "reference",
+    target_node_ids: list[str] | None = None,
     mask_irelevent_reference_nodes: bool = False,
 ) -> dict[str, float]:
     """
@@ -808,6 +813,9 @@ def aggregate_delta_deviation_from_parent(
             - "reference": aggregate each branch across reference nodes x
             - "children": aggregate branches by child nodes z; not implemented yet
             - "parent": aggregate branches by parent nodes y; not implemented yet
+    target_node_ids : list[str] | None
+        Reference node ids to aggregate over when axis="reference". If None,
+        aggregate over all reference nodes stored in delta_deviation_from_parent.
     mask_irelevent_reference_nodes : bool
         If True, exclude irrelevant references before aggregation:
             - x = z (the child) → ΔD = 2‖z - y‖^2 (positive artifact)
@@ -851,7 +859,18 @@ def aggregate_delta_deviation_from_parent(
 
     aggregated_scores = {}
     for nid, nd in branches:
-        values = cast(_DeltaDeviationRow, nd.delta_deviation_from_parent).to_array()
+        delta_deviation_row = cast(_DeltaDeviationRow, nd.delta_deviation_from_parent)
+        values = (
+            delta_deviation_row.to_array()
+            if target_node_ids is None
+            else np.array(
+                [
+                    delta_deviation_row[target_node_id]
+                    for target_node_id in target_node_ids
+                ],
+                dtype=float,
+            )
+        )
         if method.startswith("abs"):
             values = np.abs(values)
         if method in ("sum", "abs_sum"):
@@ -861,3 +880,135 @@ def aggregate_delta_deviation_from_parent(
         aggregated_scores[nid] = float(score)
 
     return aggregated_scores
+
+
+def delta_for_triplet(
+    node_x: TreeNodeExtraData,
+    node_y: TreeNodeExtraData,
+    node_z: TreeNodeExtraData,
+) -> float:
+    """
+    ΔD for a single triplet (reference x, parent y, child z):
+
+        ΔD = 2 (x - y)·(z - y) / p
+
+        y ─── z
+         ⋱  ⋰
+           x
+    """
+    x = np.asarray(node_x.tree_node.ltqsAIRoot, dtype=float)
+    y = np.asarray(node_y.tree_node.ltqsAIRoot, dtype=float)
+    z = np.asarray(node_z.tree_node.ltqsAIRoot, dtype=float)
+    return 2.0 * float(np.dot(x - y, z - y)) / len(x)
+
+
+def accumulate_delta_deviation_scores_along_lineage(
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    source_node_id: str,
+    n_steps: int = 0,
+    direction: Literal["up", "down"] = "up",
+    target_node_id: str | None = None,
+) -> tuple[float, str]:
+    """
+    Walk a lineage starting at source_node_id and accumulate signed ΔD scores,
+    recovering the absolute deviation score D(source, end).
+
+    The reference node is fixed to source_node_id, so by telescoping
+    (base case D(source, source) = 0) the accumulated value equals D(source, end):
+        - child -> parent (toward root): accumulate -ΔD stored on the child
+        - parent -> child (toward leaf): accumulate +ΔD stored on the child
+
+    Two modes:
+        - target_node_id is None: walk n_steps in `direction`.
+        - target_node_id given: walk the lineage from source to target;
+          n_steps and direction are ignored. (currently no check if lineage exists)
+
+    Requires compute_delta_deviation_from_parent to have been run with
+    source_node_id among the reference nodes (e.g. reference_node_ids=None),
+    and normalize_by_branch_length=False (normalized ΔD cannot be accumulated to D).
+
+    Parameters
+    ----------
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        Map from node id to TreeNodeExtraData with delta_deviation_from_parent set.
+    source_node_id : str
+        Node where the walk starts; also the reference node x for every step.
+    n_steps : int
+        Number of branches to traverse when target_node_id is None.
+    direction : {"up", "down"}
+        Walk toward the root ("up") or the leaves ("down") when target_node_id
+        is None. For "down", branch points follow childNodes[0].
+    target_node_id : str | None
+        If given, walk the unique lineage from source to this node instead;
+        n_steps and direction are ignored.
+
+    Returns
+    -------
+    accumulated_score : float
+        Σ signed ΔD over traversed branches == D(source_node_id, end_node_id).
+    end_node_id : str
+        Node id reached at the end of the walk.
+    """
+    if target_node_id is not None:
+        # target pins a unique lineage, so n_steps and direction are ignored.
+        # TODO: verify source and target lie on the same lineage (one an
+        # ancestor of the other); no check for now.
+
+        # Case 1: target is an ancestor of source -> walk up from source.
+        node: TreeNode | None = node_data_lookup[source_node_id].tree_node
+        upward_lineage_nodes: list[TreeNode] = []
+        while node is not None:
+            if node.nodeId == target_node_id:
+                accumulated_score: float = sum(
+                    -float(
+                        node_data_lookup[c.nodeId].delta_deviation_from_parent[  # type: ignore
+                            source_node_id
+                        ]
+                    )
+                    for c in upward_lineage_nodes
+                )
+                return accumulated_score, target_node_id
+            upward_lineage_nodes.append(node)
+            node = node.parentNode
+
+        # Case 2: target is a descendant of source -> walk up from target.
+        node = node_data_lookup[target_node_id].tree_node
+        downward_lineage_nodes: list[TreeNode] = []
+        while node is not None and node.nodeId != source_node_id:
+            downward_lineage_nodes.append(node)
+            node = node.parentNode
+        accumulated_score = sum(
+            float(
+                node_data_lookup[c.nodeId].delta_deviation_from_parent[source_node_id]  # type: ignore
+            )
+            for c in downward_lineage_nodes
+        )
+        return accumulated_score, target_node_id
+
+    current: TreeNode = node_data_lookup[source_node_id].tree_node
+    accumulated_score = 0.0
+    for _ in range(n_steps):
+        if direction == "up":
+            parent: TreeNode | None = current.parentNode
+            if current.isRoot or parent is None:
+                raise ValueError(
+                    f"reached root at {current.nodeId}; cannot take {n_steps} 'up' steps"
+                )
+            row: Mapping[str, float] | None = node_data_lookup[
+                current.nodeId
+            ].delta_deviation_from_parent
+            assert row is not None
+            accumulated_score += -float(row[source_node_id])
+            current = parent
+        else:  # "down"
+            # childNodes[0] for now.
+            if current.isLeaf or not current.childNodes:
+                raise ValueError(
+                    f"reached leaf at {current.nodeId}; cannot take {n_steps} 'down' steps"
+                )
+            child: TreeNode = current.childNodes[0]
+            row = node_data_lookup[child.nodeId].delta_deviation_from_parent
+            assert row is not None
+            accumulated_score += float(row[source_node_id])
+            current = child
+    return accumulated_score, current.nodeId
