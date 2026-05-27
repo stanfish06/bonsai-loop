@@ -894,11 +894,11 @@ def delta_for_triplet(
     """
     ΔD for a single triplet (reference x, parent y, child z):
 
-        ΔD = 2 (x - y)·(z - y) / p
+    ΔD = 2 (x - y)·(z - y) / p
 
-        y ─── z
-         ⋱  ⋰
-           x
+    y ─── z
+     ⋱  ⋰
+       x
     """
     x = np.asarray(node_x.tree_node.ltqsAIRoot, dtype=float)
     y = np.asarray(node_y.tree_node.ltqsAIRoot, dtype=float)
