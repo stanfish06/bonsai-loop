@@ -5,6 +5,9 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contentsL write
+
 jobs:
   format:
     runs-on: ubuntu-latest
@@ -16,3 +19,7 @@ jobs:
           python-version: "3.9"
 
       - run: make format-project
+
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "format project"
