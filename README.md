@@ -1,5 +1,7 @@
 # Bonsai loop
 
+[![lint](https://github.com/stanfish06/bonsai-loop/actions/workflows/lint.yml/badge.svg)](https://github.com/stanfish06/bonsai-loop/actions/workflows/lint.yml)
+
 Trajectory analysis of human 2D gastruloid data using the package [Bonsai-data-representation](https://github.com/dhdegroot/Bonsai-data-representation.git).
 
 ## Data
