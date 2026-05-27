@@ -1,4 +1,4 @@
-.PHONY: clean format-project
+.PHONY: clean format-project lint
 
 format-project:
 	uvx pyproject-fmt pyproject.toml || true
@@ -6,8 +6,13 @@ format-project:
 	uvx ruff format
 	uvx ruff check --fix
 
+lint:
+	uvx ruff check src/
+	uv run --with mypy mypy --ignore-missing-imports src/
+
 clean:
 	uv cache clean
 	uv cache prune
 	rm -rf .venv
 	rm -rf dist
+

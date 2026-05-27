@@ -1,9 +1,9 @@
 from __future__ import annotations
 from tqdm import tqdm
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from dataclasses import dataclass
-from collections import Counter
-from collections.abc import Mapping
+from collections import Counter, defaultdict
+from collections.abc import Iterator, Mapping
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -50,15 +50,15 @@ class TreeNodeExtraData:
     tree_node: TreeNode
     topological_level: int | None = None
     geometric_level: float | None = None
-    identity: dict | None = None
+    identity: dict[str, float] | None = None
     n_leaves: int | None = None
     ordering_value: float | None = None
     dendrogram_coords: tuple[float, float] | None = None
     delta_deviation_from_parent: Mapping[str, float] | None = None
-    other_props: dict | None = None
+    other_props: dict[str, Any] | None = None
 
     def __repr__(self) -> str:
-        def _print_identity(identity: dict | None, top_n: int = 3) -> str:
+        def _print_identity(identity: dict[str, float] | None, top_n: int = 3) -> str:
             if not identity:
                 return "{}"
             top = sorted(identity.items(), key=lambda kv: -kv[1])[:top_n]
@@ -357,8 +357,8 @@ def compute_node_ordering(
     ]
 
     if sort_by_identity_first:
-        identity_ordering_value_sum = Counter()
-        identity_weight_sum = Counter()
+        identity_ordering_value_sum: defaultdict[str, float] = defaultdict(float)
+        identity_weight_sum: defaultdict[str, float] = defaultdict(float)
         for _, node_data in node_data_items:
             if node_data.identity is None or node_data.ordering_value is None:
                 continue
@@ -427,7 +427,7 @@ def compute_node_ordering(
 def compute_tree_node_level_and_label(
     tree: Tree,
     node_level_type: Literal["topological", "geometric"],
-    label_lookup_leaves: dict | None = None,
+    label_lookup_leaves: dict[str, str] | None = None,
 ) -> dict[str, TreeNodeExtraData]:
     """
     Compute the tree topology/geometric level and label of each node.
@@ -467,13 +467,13 @@ def compute_tree_node_level_and_label(
     """
     if node_level_type == "geometric":
         raise NotImplementedError(f"no impl for subroutine {node_level_type}")
-    node_data_lookup = {}
+    node_data_lookup: dict[str, TreeNodeExtraData] = {}
 
     print("compute depth-first ordering of nodes")
     root_node: TreeNode = tree.root
     print(f"root node {root_node.nodeId}")
-    stack = [root_node]
-    compute_order = []
+    stack: list[TreeNode] = [root_node]
+    compute_order: list[TreeNode] = []
     while stack:
         node: TreeNode = stack.pop()
         compute_order.append(node)
@@ -636,6 +636,10 @@ class _DeltaDeviationRow(Mapping[str, float]):
 
     __slots__ = ("_row", "_ref_ids", "_ref_index")
 
+    _row: np.ndarray
+    _ref_ids: list[str]
+    _ref_index: dict[str, int]
+
     def __init__(
         self,
         row: np.ndarray,
@@ -654,7 +658,7 @@ class _DeltaDeviationRow(Mapping[str, float]):
                 raise KeyError(key) from e
         return float(self._row[self._ref_index[key]])
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(self._ref_ids)
 
     def __len__(self) -> int:
@@ -959,14 +963,13 @@ def accumulate_delta_deviation_scores_along_lineage(
         upward_lineage_nodes: list[TreeNode] = []
         while node is not None:
             if node.nodeId == target_node_id:
-                accumulated_score: float = sum(
-                    -float(
-                        node_data_lookup[c.nodeId].delta_deviation_from_parent[  # type: ignore
-                            source_node_id
-                        ]
+                accumulated_score: float = 0.0
+                for c in upward_lineage_nodes:
+                    row = node_data_lookup[c.nodeId].delta_deviation_from_parent
+                    assert row is not None, (
+                        f"delta_deviation_from_parent is None for node {c.nodeId}"
                     )
-                    for c in upward_lineage_nodes
-                )
+                    accumulated_score -= row[source_node_id]
                 return accumulated_score, target_node_id
             upward_lineage_nodes.append(node)
             node = node.parentNode
@@ -977,12 +980,13 @@ def accumulate_delta_deviation_scores_along_lineage(
         while node is not None and node.nodeId != source_node_id:
             downward_lineage_nodes.append(node)
             node = node.parentNode
-        accumulated_score = sum(
-            float(
-                node_data_lookup[c.nodeId].delta_deviation_from_parent[source_node_id]  # type: ignore
+        accumulated_score = 0.0
+        for c in downward_lineage_nodes:
+            row = node_data_lookup[c.nodeId].delta_deviation_from_parent
+            assert row is not None, (
+                f"delta_deviation_from_parent is None for node {c.nodeId}"
             )
-            for c in downward_lineage_nodes
-        )
+            accumulated_score += row[source_node_id]
         return accumulated_score, target_node_id
 
     current: TreeNode = node_data_lookup[source_node_id].tree_node
@@ -994,9 +998,7 @@ def accumulate_delta_deviation_scores_along_lineage(
                 raise ValueError(
                     f"reached root at {current.nodeId}; cannot take {n_steps} 'up' steps"
                 )
-            row: Mapping[str, float] | None = node_data_lookup[
-                current.nodeId
-            ].delta_deviation_from_parent
+            row = node_data_lookup[current.nodeId].delta_deviation_from_parent
             assert row is not None
             accumulated_score += -float(row[source_node_id])
             current = parent
