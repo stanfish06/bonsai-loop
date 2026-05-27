@@ -915,8 +915,8 @@ def accumulate_delta_deviation_scores_along_lineage(
     target_node_id: str | None = None,
 ) -> tuple[float, str]:
     """
-    Walk a lineage starting at source_node_id and accumulate signed ΔD scores,
-    all taken against a single fixed reference node reference_node_id.
+    Walk a lineage starting at source_node_id and accumulate signed ΔD scores, all taken
+    against a single fixed reference node reference_node_id.
 
     Every step reads ΔD[branch, reference_node_id] (the same reference column),
     so by telescoping the accumulated value equals

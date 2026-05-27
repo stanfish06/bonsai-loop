@@ -10,13 +10,14 @@ readme = "README.md"
 authors = [
   { name = "Zhiyuan (Stan) Yu", email = "zyyu@umich.edu" },
   { name = "Daan de Groot", email = "daanhugodegroot@gmail.com" },
-  { name = "Idse Heemskerk", email = "idse.heemskerk@gmail.com" }
+  { name = "Idse Heemskerk", email = "idse.heemskerk@gmail.com" },
 ]
 requires-python = ">=3.9,<3.10"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.9",
 ]
+# this is needed in case need to build pytables locally (e.g. for arm)
 dependencies = [
   "dtne>=0.5.1",
   "faicons==0.2.2",
@@ -38,13 +39,6 @@ dependencies = [
   "tables==3.9.2",
 ]
 
-# this is needed in case need to build pytables locally (e.g. for arm)
-[tool.uv]
-build-constraint-dependencies = [
-  "blosc2<2.6.2",
-  "numpy<2",
-]
-
 [tool.ruff]
 line-length = 88
 exclude = [
@@ -52,3 +46,9 @@ exclude = [
   "Sanity",
 ]
 lint.per-file-ignores."src/bonsai_loop/bonsai_lib.py" = [ "E402" ]
+
+[tool.uv]
+build-constraint-dependencies = [
+  "blosc2<2.6.2",
+  "numpy<2",
+]
