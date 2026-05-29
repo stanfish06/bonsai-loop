@@ -39,12 +39,6 @@ dependencies = [
   "tables==3.9.2",
 ]
 
-[tool.uv]
-build-constraint-dependencies = [
-  "blosc2<2.6.2",
-  "numpy<2",
-]
-
 [tool.ruff]
 line-length = 88
 exclude = [
@@ -52,3 +46,9 @@ exclude = [
   "Sanity",
 ]
 lint.per-file-ignores."src/bonsai_loop/bonsai_lib.py" = [ "E402" ]
+
+[tool.uv]
+build-constraint-dependencies = [
+  "blosc2<2.6.2",
+  "numpy<2",
+]
