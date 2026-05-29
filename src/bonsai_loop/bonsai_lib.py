@@ -210,6 +210,7 @@ def _patristic_pdist(
     if missing:
         raise KeyError(f"cell_ids not found in tree (first missing: {missing[0]!r})")
 
+    edge_weight: Callable[[Any, Any], float]
     if weight_kind == "t":
         edge_weight = _edge_weight_t
     elif weight_kind == "euclidean":
