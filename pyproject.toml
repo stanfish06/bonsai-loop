@@ -39,6 +39,12 @@ dependencies = [
   "tables==3.9.2",
 ]
 
+[dependency-groups]
+dev = [
+  "pyright>=1.1.411",
+  "ruff>=0.15.20",
+]
+
 [tool.ruff]
 line-length = 88
 exclude = [
@@ -52,10 +58,4 @@ lint.per-file-ignores."src/bonsai_loop/bonsai_lib.py" = [ "E402" ]
 build-constraint-dependencies = [
   "blosc2<2.6.2",
   "numpy<2",
-]
-
-[dependency-groups]
-dev = [
-    "pyright>=1.1.411",
-    "ruff>=0.15.20",
 ]
