@@ -55,6 +55,7 @@ class TreeNodeExtraData:
     ordering_value: float | None = None
     dendrogram_coords: tuple[float, float] | None = None
     delta_deviation_from_parent: Mapping[str, float] | None = None
+    delta_deviation_from_parent_smooth: Mapping[str, float] | None = None
     other_props: dict[str, Any] | None = None
 
     def __repr__(self) -> str:
@@ -79,6 +80,9 @@ class TreeNodeExtraData:
             "ordering_value": self.ordering_value,
             "dendrogram_coords": self.dendrogram_coords,
             "delta_deviation_from_parent": _print_dict_summary(
+                self.delta_deviation_from_parent
+            ),
+            "delta_deviation_from_parent_smooth": _print_dict_summary(
                 self.delta_deviation_from_parent
             ),
             "other_props": self.other_props,
@@ -784,6 +788,13 @@ def compute_delta_deviation_from_parent(
         )
 
 
+def smoothen_delta_deviation(
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    reference_node_ids: list[str] | None = None,
+):
+    pass
+
+
 def aggregate_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
     method: Literal["sum", "abs_sum", "mean", "abs_mean"] = "sum",
@@ -839,7 +850,7 @@ def aggregate_delta_deviation_from_parent(
             "no impl for subroutine mask irelevent reference nodes"
         )
 
-    branches = [
+    branches: list[tuple[str, TreeNodeExtraData]] = [
         (nid, nd)
         for nid, nd in node_data_lookup.items()
         if nd.delta_deviation_from_parent is not None
