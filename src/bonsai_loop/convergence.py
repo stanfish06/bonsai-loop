@@ -92,6 +92,11 @@ class TreeNodeExtraData:
             "delta_deviation_from_parent_smooth": _print_dict_summary(
                 self.delta_deviation_from_parent
             ),
+            "branch_projection": (
+                "None"
+                if self.branch_projection is None
+                else f"DataFrame(shape={self.branch_projection.shape})"
+            ),
             "other_props": self.other_props,
         }
 
