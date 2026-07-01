@@ -43,6 +43,12 @@ class TreeNodeExtraData:
     delta_deviation_from_parent : Mapping[str, float] | None
         Delta deviation scores for the incoming branch parent -> current node, indexed by reference node id
         (or by integer column index).
+    branch_projection : pd.DataFrame | None
+        Per-gene branch projection terms for the incoming branch parent (y) -> current node (z).
+        Rows are indexed by reference node id (x), columns by gene (gene_names if provided, else integer
+        gene index). Each cell holds the gene's contribution to the projection of (z - y) onto (x - z),
+        i.e. (z_k - y_k)(x_k - z_k) / (x - z)^t(x - z), optionally divided by the branch length. Summing a
+        row over genes recovers the full normalized projection scalar for that reference.
     other_props: dict | None
         Other non-essential properties
     """
@@ -56,6 +62,7 @@ class TreeNodeExtraData:
     dendrogram_coords: tuple[float, float] | None = None
     delta_deviation_from_parent: Mapping[str, float] | None = None
     delta_deviation_from_parent_smooth: Mapping[str, float] | None = None
+    branch_projection: pd.DataFrame | None = None
     other_props: dict[str, Any] | None = None
 
     def __repr__(self) -> str:
@@ -671,6 +678,86 @@ class _DeltaDeviationRow(Mapping[str, float]):
     def to_array(self) -> np.ndarray:
         """Return the underlying row as a numpy view into the shared ΔD matrix."""
         return self._row
+
+
+def compute_branch_projection(
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    reference_node_ids: list[str] | None = None,
+    normalize_by_branch_length: bool = True,
+    gene_names: list[str] | None = None,
+):
+    """
+    Compute branch projection towards reference cells.
+
+    An example triplet of a parent (y), child (z), and reference node (x):
+        y ─── z
+         ⋱  ⋰
+           x
+    - Project (z - y) onto (x - z)
+        - (z - y)^t(x - z) / (x - z)^t(x - z)
+        - Optionally, normalize by branch length, (z - y)^t(x - z) / branch_length_yz / (x - z)^t(x - z)
+        - For each projection, (z - y)^t(x - z) = ΔG1_yz * ΔG1_zx + ᳟ +  ΔGp_yz * ΔGp_zx,
+          so a crude way to check if a gene contributes to convergence is to see if ΔGk_yz * ΔGk_zx is positive and large
+    """
+
+    # if reference node ids provided, use as is, otherwise use all node data map's keys
+    ref_ids = (
+        list(node_data_lookup)
+        if reference_node_ids is None
+        else list(reference_node_ids)
+    )
+
+    # from the node data map, we obtain tuple (child node id, child node object, parent node object)
+    branch_nodes: list[tuple[str, TreeNode, TreeNode]] = [
+        (nid, nd.tree_node, nd.tree_node.parentNode)
+        for nid, nd in node_data_lookup.items()
+        if not nd.tree_node.isRoot and nd.tree_node.parentNode is not None
+    ]
+
+    # reset branch_projection
+    for nd in node_data_lookup.values():
+        nd.branch_projection = None
+
+    inv_sqrt_d = 1.0 / np.sqrt(len(branch_nodes[0][1].ltqsAIRoot))
+    Z = (
+        np.stack([np.asarray(z.ltqsAIRoot, dtype=float) for _, z, _ in branch_nodes])
+        * inv_sqrt_d
+    )
+    Y = (
+        np.stack([np.asarray(y.ltqsAIRoot, dtype=float) for _, _, y in branch_nodes])
+        * inv_sqrt_d
+    )
+    X = (
+        np.stack(
+            [
+                np.asarray(node_data_lookup[rid].tree_node.ltqsAIRoot, dtype=float)
+                for rid in ref_ids
+            ]
+        )
+        * inv_sqrt_d
+    )
+
+    V = Z - Y
+
+    print(
+        f"compute branch projection for {len(branch_nodes)} branches × {len(ref_ids)} refs"
+    )
+    if normalize_by_branch_length:
+        print("normalize branch projection by branch length")
+        t_parents = np.asarray(
+            [float(c.tParent) for _, c, _ in branch_nodes], dtype=float
+        )
+
+    for i, (nid, _, _) in enumerate(branch_nodes):
+        diff_xz = X - Z[i]
+        numerator = diff_xz * V[i]
+        denominator = np.einsum("ij,ij->i", diff_xz, diff_xz)
+        terms = numerator / denominator[:, None]
+        if normalize_by_branch_length:
+            terms = terms / t_parents[i]
+        node_data_lookup[nid].branch_projection = pd.DataFrame(
+            terms, index=ref_ids, columns=gene_names
+        )
 
 
 def compute_delta_deviation_from_parent(
