@@ -690,8 +690,8 @@ def _branch_lengths(branch_nodes: list[tuple[str, TreeNode, TreeNode]]) -> np.nd
     Bonsai tParent per parent->child branch, for normalizing per-branch quantities.
 
     A zero-length branch is NaN rather than 0.0: it cannot be normalized, and NaN keeps
-    the outcome the same for every branch quantity instead of yielding +/-inf for a
-    non-zero numerator and NaN for a zero one.
+    the outcome the same for every branch quantity instead of yielding +/-inf for a non-
+    zero numerator and NaN for a zero one.
     """
     t_parents = np.asarray([float(c.tParent) for _, c, _ in branch_nodes], dtype=float)
     t_parents[t_parents == 0.0] = np.nan

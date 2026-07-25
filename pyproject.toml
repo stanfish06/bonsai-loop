@@ -47,12 +47,6 @@ dev = [
   "types-tqdm>=4.67.3.20260205",
 ]
 
-[tool.uv]
-build-constraint-dependencies = [
-  "blosc2<2.6.2",
-  "numpy<2",
-]
-
 [tool.ruff]
 line-length = 88
 exclude = [
@@ -61,3 +55,9 @@ exclude = [
 ]
 # this is needed in case need to build pytables locally (e.g. for arm)
 lint.per-file-ignores."src/bonsai_loop/bonsai_lib.py" = [ "E402" ]
+
+[tool.uv]
+build-constraint-dependencies = [
+  "blosc2<2.6.2",
+  "numpy<2",
+]
