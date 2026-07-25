@@ -1,0 +1,7 @@
+project-excludes = [
+    "Bonsai-data-representation",
+    "Sanity",
+    ".venv",
+]
+search-path = ["Bonsai-data-representation"]
+infer-with-first-use = false
