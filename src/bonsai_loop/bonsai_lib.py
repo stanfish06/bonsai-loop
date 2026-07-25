@@ -1,8 +1,8 @@
 import sys
+from pathlib import Path
 from typing import Any, Callable, Literal
 
 import numpy as np
-from pathlib import Path
 
 _BONSAI = Path(__file__).resolve().parents[2] / "Bonsai-data-representation"
 if str(_BONSAI) not in sys.path:
@@ -32,14 +32,14 @@ sys.modules[
 
 # import relevant functions for distance computation
 # pretend to be submodules of bonsai_lib
-from .bonsai_lib.downstream_analyses import (  # type: ignore[import]
-    get_clusters_max_diameter as bonsai_clustering,
-)
 from .bonsai_lib.bonsai.bonsai_dataprocessing import (  # type: ignore[import]
     get_bonsai_euclidean_distances,
     get_bonsai_posteriors,
 )
 from .bonsai_lib.bonsai_scout.my_tree_layout import Layout_Tree  # type: ignore[import]
+from .bonsai_lib.downstream_analyses import (  # type: ignore[import]
+    get_clusters_max_diameter as bonsai_clustering,
+)
 
 WeightKind = Literal["t", "euclidean"]
 
@@ -316,9 +316,9 @@ def get_pdists_on_tree_euclidean(
 
 
 __all__ = [
-    "get_pdists_on_tree_euclidean",
+    "Layout_Tree",
+    "bonsai_clustering",
     "get_bonsai_euclidean_distances",
     "get_pdists_on_tree",
-    "bonsai_clustering",
-    "Layout_Tree",
+    "get_pdists_on_tree_euclidean",
 ]

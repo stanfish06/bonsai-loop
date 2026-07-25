@@ -1,15 +1,18 @@
 from __future__ import annotations
-from tqdm import tqdm
-from typing import Any, Literal, cast
-from dataclasses import dataclass
+
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal, cast
+
 import networkx as nx
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import shortest_path
 from scipy.spatial.distance import pdist, squareform
+from tqdm import tqdm
+
 from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode  # type: ignore[import]
 
 
@@ -268,7 +271,7 @@ def compute_bonsai_tree_dendrogram(
             if x_max > 0
             else xlims[0]
         )
-        node_data.dendrogram_coords = (float(x), y_coords[node_id])
+        node_data.dendrogram_coords = (x, y_coords[node_id])
 
 
 def compute_node_ordering_value(
@@ -309,9 +312,7 @@ def compute_node_ordering_value(
             G, source=root_node.nodeId, weight="dist"
         )
         for node_id, node_data in node_data_lookup.items():
-            node_data.ordering_value = (
-                tree_dists_to_root[node_id] if node_id in tree_dists_to_root else None
-            )
+            node_data.ordering_value = tree_dists_to_root.get(node_id, None)
     elif metric == "dendrogram":
         for node_id, node_data in node_data_lookup.items():
             node_data.ordering_value = (
@@ -513,8 +514,7 @@ def compute_tree_node_level_and_label(
             node_data = TreeNodeExtraData(tree_node=node)
         node_data_lookup[node.nodeId] = node_data
 
-        for child_node in node.childNodes:
-            stack.append(child_node)
+        stack.extend(node.childNodes)
 
     print("compute node level and label")
     for node in tqdm(reversed(compute_order)):
@@ -650,7 +650,7 @@ class _DeltaDeviationRow(Mapping[str, float]):
         - int: positional column  -> ΔD for the i-th reference
     """
 
-    __slots__ = ("_row", "_ref_ids", "_ref_index")
+    __slots__ = ("_ref_ids", "_ref_index", "_row")
 
     _row: np.ndarray
     _ref_ids: list[str]
@@ -683,6 +683,19 @@ class _DeltaDeviationRow(Mapping[str, float]):
     def to_array(self) -> np.ndarray:
         """Return the underlying row as a numpy view into the shared ΔD matrix."""
         return self._row
+
+
+def _branch_lengths(branch_nodes: list[tuple[str, TreeNode, TreeNode]]) -> np.ndarray:
+    """
+    Bonsai tParent per parent->child branch, for normalizing per-branch quantities.
+
+    A zero-length branch is NaN rather than 0.0: it cannot be normalized, and NaN keeps
+    the outcome the same for every branch quantity instead of yielding +/-inf for a non-
+    zero numerator and NaN for a zero one.
+    """
+    t_parents = np.asarray([float(c.tParent) for _, c, _ in branch_nodes], dtype=float)
+    t_parents[t_parents == 0.0] = np.nan
+    return t_parents
 
 
 def compute_branch_projection(
@@ -747,22 +760,123 @@ def compute_branch_projection(
     print(
         f"compute branch projection for {len(branch_nodes)} branches × {len(ref_ids)} refs"
     )
+    t_parents: np.ndarray | None = None
     if normalize_by_branch_length:
         print("normalize branch projection by branch length")
-        t_parents = np.asarray(
-            [float(c.tParent) for _, c, _ in branch_nodes], dtype=float
-        )
+        t_parents = _branch_lengths(branch_nodes)
+
+    # built once and shared: Index is immutable, and this avoids rebuilding the labels
+    # for every branch
+    row_labels = pd.Index(ref_ids)
+    col_labels = None if gene_names is None else pd.Index(gene_names)
 
     for i, (nid, _, _) in enumerate(branch_nodes):
         diff_xz = X - Z[i]
         numerator = diff_xz * V[i]
         denominator = np.einsum("ij,ij->i", diff_xz, diff_xz)
-        terms = numerator / denominator[:, None]
-        if normalize_by_branch_length:
+
+        zero_denominator = np.where(denominator == 0.0, np.nan, denominator)
+        terms = numerator / zero_denominator[:, None]
+        if t_parents is not None:
             terms = terms / t_parents[i]
+
         node_data_lookup[nid].branch_projection = pd.DataFrame(
-            terms, index=ref_ids, columns=gene_names
+            terms, index=row_labels, columns=col_labels
         )
+
+
+# Node filter function, need to be refactor after having a better container of nodes in the future
+def select_nodes(
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    attribute: str | None = "branch_projection",
+    identity: list[str] | None = None,
+    min_identity_threshold: float = 0.0,
+    min_global_mean_delta_deviation_threshold: float | None = None,
+) -> set[str]:
+    """
+    Select the nodes matching one or more criteria and return their node ids.
+
+    Parameters
+    ----------
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        A map from TreeNode.nodeId to TreeNodeExtraData.
+    attribute : str | None
+        Main filter attribute; only nodes where it is populated are considered. Pass
+        None to consider every node.
+    identity : list[str] | None
+        Node identity (TreeNodeExtraData.identity) filter
+    min_identity_threshold : float
+        Nodes whose TreeNodeExtraData.identity summed over the requested labels is
+        >= min_identity_threshold will be kept. The default 0.0 keeps every node
+        carrying at least one of them.
+    min_global_mean_delta_deviation_threshold : float | None
+        Nodes with global delta deviation values >=
+        min_global_mean_delta_deviation_threshold will be kept, the score being the
+        mean of ΔD over all stored reference nodes.
+
+    Returns
+    -------
+    keep : set[str]
+        Node ids matching the criteria.
+    """
+    if not node_data_lookup:
+        return set()
+
+    if attribute is None:
+        keep = set(node_data_lookup)
+    else:
+        keep = {
+            nid
+            for nid, nd in node_data_lookup.items()
+            if getattr(nd, attribute, None) is not None
+        }
+        if not keep:
+            raise ValueError(
+                f"no node has {attribute!r} set; run the compute step that populates "
+                "it, or pass attribute=None to select over all nodes"
+            )
+
+    if identity is not None:
+        labelled = {
+            nid: ident for nid in keep if (ident := node_data_lookup[nid].identity)
+        }
+        if not labelled:
+            raise ValueError(
+                "identity requires TreeNodeExtraData.identity; run "
+                "compute_tree_node_level_and_label with label_lookup_leaves first"
+            )
+        available = {label for ident in labelled.values() for label in ident}
+        unknown = sorted(set(identity) - available)
+        if unknown:
+            raise ValueError(
+                f"unknown identity label(s) {unknown}; available: {sorted(available)}"
+            )
+        # summed over the requested labels, so a list is thresholded jointly: e.g.
+        # ["pgc", "endo"] at 0.8 keeps nodes that are >= 80% pgc-or-endo combined
+        keep &= {
+            nid
+            for nid, ident in labelled.items()
+            if (total := sum(ident.get(label, 0.0) for label in identity)) > 0.0
+            and total >= min_identity_threshold
+        }
+
+    if min_global_mean_delta_deviation_threshold is not None:
+        if all(
+            nd.delta_deviation_from_parent is None for nd in node_data_lookup.values()
+        ):
+            raise ValueError(
+                "min_global_mean_delta_deviation_threshold requires "
+                "delta_deviation_from_parent; run compute_delta_deviation_from_parent "
+                "first"
+            )
+        scores = aggregate_delta_deviation_from_parent(node_data_lookup, method="mean")
+        keep &= {
+            nid
+            for nid, score in scores.items()
+            if score >= min_global_mean_delta_deviation_threshold
+        }
+
+    return keep
 
 
 def compute_delta_deviation_from_parent(
@@ -869,10 +983,7 @@ def compute_delta_deviation_from_parent(
 
     if normalize_by_branch_length:
         print("normalize delta deviation by branch length")
-        t_parents = np.asarray(
-            [float(c.tParent) for _, c, _ in branch_nodes], dtype=float
-        )
-        delta_d /= t_parents[:, None]
+        delta_d /= _branch_lengths(branch_nodes)[:, None]
 
     for i, (nid, _, _) in enumerate(branch_nodes):
         node_data_lookup[nid].delta_deviation_from_parent = _DeltaDeviationRow(
@@ -883,8 +994,150 @@ def compute_delta_deviation_from_parent(
 def smoothen_delta_deviation(
     node_data_lookup: dict[str, TreeNodeExtraData],
     reference_node_ids: list[str] | None = None,
-):
-    pass
+    tau: float = 1.0,
+    cutoff_multiplier: float = 3.0,
+    normalize: bool = True,
+) -> None:
+    """
+    Compute smoothed ΔD using expoential kernel.
+
+    For branch b, child node j: i→j with parent i and children δ(i) = {descendents}:
+        - Smoothed branch ΔD'(j) = ∑_parents ΔD(p)*exp(-d(p)/τ) + ∑_children ΔD(c)*exp(-d(c)/τ)
+          for distance d from midpoint, c∈δ(i)
+        - If normalize == True: divide each branch by ∑exp(-d(i)/τ) for all nodes i in the sum
+
+    Parameters
+    ----------
+    node_data_lookup: dict[str, TreeNodeExtraData]
+       Map from TreeNodel.nodeId to TreeNodeExtraData
+    reference_node_ids: list[str] | None = None
+       List of reference nodes used in computing delta-deviation scores (tyically one)
+    tau: float = 1.0
+       Exponential kernel length
+    cutoff_multiplier: float = 3.0
+       Cutoff distance for calculating exponential weights to reduce compute time
+    normalize: bool = True
+       Set to true to divide smoothed delta deviations by total weight (accounting
+           for density of children
+
+    Returns
+    -------
+    None
+        Smoothed delta deviations are stored in TreeNodeExtraData.delta_deviation_from_parent_smooth
+    """
+
+    def expweight(t: float) -> float:
+        return float(np.exp(-t / tau))
+
+    branches = [
+        (nid, nd)
+        for nid, nd in node_data_lookup.items()
+        if nd.delta_deviation_from_parent is not None
+    ]
+    for nd in node_data_lookup.values():
+        nd.delta_deviation_from_parent_smooth = None
+    if not branches:
+        return
+
+    stored_ref_ids = list(
+        cast(_DeltaDeviationRow, branches[0][1].delta_deviation_from_parent)
+    )
+    if reference_node_ids is None:
+        ref_ids = stored_ref_ids
+        col_sel = np.arange(len(stored_ref_ids))
+    else:
+        pos = {r: i for i, r in enumerate(stored_ref_ids)}
+        missing = [r for r in reference_node_ids if r not in pos]
+        if missing:
+            raise KeyError(
+                f"references not in delta_deviation_from_parent: {missing[:5]}"
+            )
+        ref_ids = list(reference_node_ids)
+        col_sel = np.array([pos[r] for r in ref_ids], dtype=int)
+    ref_index = {r: i for i, r in enumerate(ref_ids)}
+
+    branch_ids = [nid for nid, _ in branches]
+    row_of = {nid: i for i, nid in enumerate(branch_ids)}
+    delta_mat = np.stack(
+        [
+            np.asarray(
+                cast(_DeltaDeviationRow, nd.delta_deviation_from_parent).to_array(),
+                dtype=float,
+            )[col_sel]
+            for _, nd in branches
+        ]
+    )
+
+    tparent = {
+        nid: float(node_data_lookup[nid].tree_node.tParent or 0.0)
+        for nid in node_data_lookup
+    }
+    parent_ = {
+        nid: (
+            node_data_lookup[nid].tree_node.parentNode.nodeId
+            if node_data_lookup[nid].tree_node.parentNode is not None
+            else None
+        )
+        for nid in node_data_lookup
+    }
+    children_ = {
+        nid: [c.nodeId for c in node_data_lookup[nid].tree_node.childNodes]
+        for nid in node_data_lookup
+    }
+    cutoff = cutoff_multiplier * tau
+
+    def ancestor_chain(nid: str) -> list[tuple[str, float]]:
+        cum = 0.5 * tparent[nid]
+        chain: list[tuple[str, float]] = []
+        cur = parent_[nid]
+        while cur is not None and cum < cutoff:
+            cum += 0.5 * tparent[cur]
+            if cum >= cutoff:
+                break
+            chain.append((cur, cum))
+            cum += 0.5 * tparent[cur]
+            cur = parent_[cur]
+        return chain
+
+    def descendant_chain(nid: str) -> list[tuple[str, float]]:
+        frontier = [(cid, 0.5 * tparent[nid]) for cid in children_[nid]]
+        result: list[tuple[str, float]] = []
+        while frontier:
+            next_frontier: list[tuple[str, float]] = []
+            for cid, dist_to_top in frontier:
+                dist_to_mid = dist_to_top + 0.5 * tparent[cid]
+                if dist_to_mid >= cutoff:
+                    continue
+                result.append((cid, dist_to_mid))
+                dist_to_bottom = dist_to_top + tparent[cid]
+                for gc in children_[cid]:
+                    next_frontier.append((gc, dist_to_bottom))
+            frontier = next_frontier
+        return result
+
+    # nan values are skipped
+    valid = ~np.isnan(delta_mat)
+    np.copyto(delta_mat, 0.0, where=~valid)
+
+    smoothed = delta_mat.copy()
+    weight_sum = valid.astype(float)
+    for i, nid in enumerate(branch_ids):
+        for neighbor_id, d in ancestor_chain(nid) + descendant_chain(nid):
+            j = row_of.get(neighbor_id)
+            if j is None:
+                continue
+            w = expweight(d)
+            smoothed[i] += w * delta_mat[j]
+            weight_sum[i] += w * valid[j]
+    # nothing valid anywhere in the neighborhood, including the branch itself
+    smoothed[weight_sum == 0.0] = np.nan
+    if normalize:
+        smoothed = np.divide(smoothed, weight_sum, out=smoothed, where=weight_sum > 0.0)
+
+    for i, nid in enumerate(branch_ids):
+        node_data_lookup[nid].delta_deviation_from_parent_smooth = _DeltaDeviationRow(
+            smoothed[i], ref_ids, ref_index
+        )
 
 
 def aggregate_delta_deviation_from_parent(
@@ -893,6 +1146,7 @@ def aggregate_delta_deviation_from_parent(
     axis: Literal["reference", "children", "parent"] = "reference",
     target_node_ids: list[str] | None = None,
     mask_irelevent_reference_nodes: bool = False,
+    smoothed: bool = False,
 ) -> dict[str, float]:
     """
     Aggregate delta deviation scores ΔD for each branch.
@@ -929,6 +1183,8 @@ def aggregate_delta_deviation_from_parent(
             - x = y (the parent) → ΔD = 0 (zero artifact)
             - x descendant of z or ancestor of y (potential cycle artifacts)
         Not implemented yet.
+    smoothed: bool
+        If True, agglomerate using smoothed ΔD scores
 
     Returns
     -------
@@ -937,6 +1193,13 @@ def aggregate_delta_deviation_from_parent(
         score. Keys are the same as keys in node_data_lookup, restricted to
         non-root nodes whose delta_deviation_from_parent is set.
     """
+    if smoothed and all(
+        nd.delta_deviation_from_parent_smooth is None
+        for nd in node_data_lookup.values()
+    ):
+        smoothed = False
+        print("No smoothed values found. Using unsmoothed values")
+
     if mask_irelevent_reference_nodes:
         raise NotImplementedError(
             "no impl for subroutine mask irelevent reference nodes"
@@ -951,12 +1214,23 @@ def aggregate_delta_deviation_from_parent(
         return {}
 
     def _get_delta_deviation_matrix() -> np.ndarray:
-        return np.stack(
-            [
-                cast(_DeltaDeviationRow, nd.delta_deviation_from_parent).to_array()
-                for _, nd in branches
-            ]
-        )
+
+        if smoothed:
+            return np.stack(
+                [
+                    cast(
+                        _DeltaDeviationRow, nd.delta_deviation_from_parent_smooth
+                    ).to_array()
+                    for _, nd in branches
+                ]
+            )
+        else:
+            return np.stack(
+                [
+                    cast(_DeltaDeviationRow, nd.delta_deviation_from_parent).to_array()
+                    for _, nd in branches
+                ]
+            )
 
     if axis in ("children", "parent"):
         _get_delta_deviation_matrix()
@@ -966,7 +1240,12 @@ def aggregate_delta_deviation_from_parent(
 
     aggregated_scores = {}
     for nid, nd in branches:
-        delta_deviation_row = cast(_DeltaDeviationRow, nd.delta_deviation_from_parent)
+        delta_deviation_row = cast(
+            _DeltaDeviationRow,
+            nd.delta_deviation_from_parent_smooth
+            if smoothed
+            else nd.delta_deviation_from_parent,
+        )
         values = (
             delta_deviation_row.to_array()
             if target_node_ids is None
@@ -980,10 +1259,12 @@ def aggregate_delta_deviation_from_parent(
         )
         if method.startswith("abs"):
             values = np.abs(values)
-        if method in ("sum", "abs_sum"):
-            score = values.sum()
-        else:
-            score = values.mean()
+        # nan values are skipped
+        values = values[~np.isnan(values)]
+        if values.size == 0:
+            aggregated_scores[nid] = float("nan")
+            continue
+        score = values.sum() if method in ("sum", "abs_sum") else values.mean()
         aggregated_scores[nid] = float(score)
 
     return aggregated_scores
@@ -1016,6 +1297,7 @@ def accumulate_delta_deviation_scores_along_lineage(
     n_steps: int = 0,
     direction: Literal["up", "down"] = "up",
     target_node_id: str | None = None,
+    smoothed: bool | None = False,
 ) -> tuple[float, str]:
     """
     Walk a lineage starting at source_node_id and accumulate signed ΔD scores, all taken
@@ -1054,6 +1336,8 @@ def accumulate_delta_deviation_scores_along_lineage(
     target_node_id : str | None
         If given, walk the unique lineage from source to this node instead;
         n_steps and direction are ignored.
+    smoothed : bool | None
+        If given (True), use smoothed delta-deviation values
 
     Returns
     -------
@@ -1063,6 +1347,13 @@ def accumulate_delta_deviation_scores_along_lineage(
     end_node_id : str
         Node id reached at the end of the walk.
     """
+    if smoothed and all(
+        nd.delta_deviation_from_parent_smooth is None
+        for nd in node_data_lookup.values()
+    ):
+        smoothed = False
+        print("No smoothed values found. Using unsmoothed values")
+
     if target_node_id is not None:
         # target pins a unique lineage, so n_steps and direction are ignored.
         # TODO: verify source and target lie on the same lineage (one an
@@ -1075,7 +1366,12 @@ def accumulate_delta_deviation_scores_along_lineage(
             if node.nodeId == target_node_id:
                 accumulated_score: float = 0.0
                 for c in upward_lineage_nodes:
-                    row = node_data_lookup[c.nodeId].delta_deviation_from_parent
+                    if smoothed:
+                        row = node_data_lookup[
+                            c.nodeId
+                        ].delta_deviation_from_parent_smooth
+                    else:
+                        row = node_data_lookup[c.nodeId].delta_deviation_from_parent
                     assert row is not None, (
                         f"delta_deviation_from_parent is None for node {c.nodeId}"
                     )
@@ -1092,7 +1388,10 @@ def accumulate_delta_deviation_scores_along_lineage(
             node = node.parentNode
         accumulated_score = 0.0
         for c in downward_lineage_nodes:
-            row = node_data_lookup[c.nodeId].delta_deviation_from_parent
+            if smoothed:
+                row = node_data_lookup[c.nodeId].delta_deviation_from_parent_smooth
+            else:
+                row = node_data_lookup[c.nodeId].delta_deviation_from_parent
             assert row is not None, (
                 f"delta_deviation_from_parent is None for node {c.nodeId}"
             )
@@ -1108,9 +1407,13 @@ def accumulate_delta_deviation_scores_along_lineage(
                 raise ValueError(
                     f"reached root at {current.nodeId}; cannot take {n_steps} 'up' steps"
                 )
-            row = node_data_lookup[current.nodeId].delta_deviation_from_parent
+            row = (
+                node_data_lookup[current.nodeId].delta_deviation_from_parent_smooth
+                if smoothed
+                else node_data_lookup[current.nodeId].delta_deviation_from_parent
+            )
             assert row is not None
-            accumulated_score += -float(row[reference_node_id])
+            accumulated_score += -row[reference_node_id]
             current = parent
         else:  # "down"
             # childNodes[0] for now.
@@ -1119,8 +1422,12 @@ def accumulate_delta_deviation_scores_along_lineage(
                     f"reached leaf at {current.nodeId}; cannot take {n_steps} 'down' steps"
                 )
             child: TreeNode = current.childNodes[0]
-            row = node_data_lookup[child.nodeId].delta_deviation_from_parent
+            row = (
+                node_data_lookup[child.nodeId].delta_deviation_from_parent_smooth
+                if smoothed
+                else node_data_lookup[child.nodeId].delta_deviation_from_parent
+            )
             assert row is not None
-            accumulated_score += float(row[reference_node_id])
+            accumulated_score += row[reference_node_id]
             current = child
     return accumulated_score, current.nodeId

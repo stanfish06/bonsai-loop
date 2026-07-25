@@ -1,4 +1,3 @@
-from . import bonsai_lib
-from . import convergence
+from . import bonsai_lib, convergence
 
 __all__ = ["bonsai_lib", "convergence"]

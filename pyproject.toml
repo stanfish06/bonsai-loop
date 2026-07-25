@@ -40,8 +40,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "pyrefly>=1.1.1",
   "pyright>=1.1.411",
   "ruff>=0.15.20",
+  "types-networkx>=3.4.2.20250509",
+  "types-tqdm>=4.67.3.20260205",
 ]
 
 [tool.ruff]
