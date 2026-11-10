@@ -65,6 +65,7 @@ line-length = 88
 exclude = [
   "Bonsai-data-representation",
   "packages/pybonsai/third_party",
+  "third_party",
 ]
 lint.per-file-ignores."src/bonsai_loop/bonsai_lib.py" = [ "E402" ]
 

@@ -2,5 +2,5 @@
   "venvPath": ".",
   "venv": ".venv",
   "extraPaths": ["Bonsai-data-representation", "packages/pybonsai/src"],
-  "exclude": ["Bonsai-data-representation", "packages/pybonsai/third_party", "packages/pybonsai/build", ".venv"]
+  "exclude": ["Bonsai-data-representation", "packages/pybonsai/third_party", "packages/pybonsai/build", "third_party", "build", ".venv"]
 }

@@ -1,5 +1,5 @@
 {
-  description = "bonsai-loop build shell for packages/pybonsai: a C++20 compiler that can link, cmake, ninja, eigen";
+  description = "bonsai-loop build shell: a C++20 compiler that can link, cmake, ninja, eigen, zlib";
 
   # Resolves through the flake registry, which NixOS pins to the system nixpkgs.
   inputs.nixpkgs.url = "nixpkgs";
@@ -22,6 +22,7 @@
             pkgs.cmake
             pkgs.ninja
             pkgs.eigen
+            pkgs.zlib
           ];
         };
       });

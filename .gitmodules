@@ -8,3 +8,7 @@
 [submodule "packages/pybonsai/third_party/bonsai_port"]
 	path = packages/pybonsai/third_party/bonsai_port
 	url = git@github.com:deGrootGroup/bonsai_port.git
+[submodule "third_party/supercellstates"]
+	path = third_party/supercellstates
+	url = git@github.com:deGrootGroup/supercellstates.git
+	branch = single_loop
