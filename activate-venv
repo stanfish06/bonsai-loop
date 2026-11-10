@@ -7,7 +7,7 @@ _root() {
     fi
     local d="$PWD"
     while [[ "$d" != "/" ]]; do
-        if [[ -f "$d/.venv/bin/activate" && -d "$d/Bonsai-data-representation" ]]; then
+        if [[ -f "$d/.venv/bin/activate" && -d "$d/third_party/Bonsai-data-representation" ]]; then
             printf '%s\n' "$d"
             return 0
         fi
@@ -20,7 +20,7 @@ _activate() {
     local r
     r="$(_root)" || return 1
     source "${r}/.venv/bin/activate"
-    export PYTHONPATH="${r}/Bonsai-data-representation${PYTHONPATH:+:${PYTHONPATH}}"
+    export PYTHONPATH="${r}/third_party/Bonsai-data-representation${PYTHONPATH:+:${PYTHONPATH}}"
 }
 
 if [[ "${BASH_SOURCE[0]:-}" == "${0:-}" ]]; then

@@ -63,7 +63,6 @@ workspace.members = [ "packages/*" ]
 [tool.ruff]
 line-length = 88
 exclude = [
-  "Bonsai-data-representation",
   "packages/pybonsai/third_party",
   "third_party",
 ]

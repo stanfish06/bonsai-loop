@@ -14,9 +14,7 @@ bonsai:
 CELLSTATES_DIR ?= third_party/supercellstates
 CELLSTATES_BUILD_DIR ?= build/cellstates
 
-# Build the cellstates executable at $(CELLSTATES_BUILD_DIR)/cellstates, with the flags of
-# supercellstates' own Makefile. Needs a C++20 compiler, OpenMP and zlib; on NixOS run it
-# as `nix develop -c make cellstates`.
+# Build the cellstates executable at $(CELLSTATES_BUILD_DIR)/cellstates
 cellstates:
 	mkdir -p $(CELLSTATES_BUILD_DIR)
 	$(CXX) -std=c++20 -O3 -ffast-math -fopenmp $(CELLSTATES_DIR)/cluster.cpp -o $(CELLSTATES_BUILD_DIR)/cellstates -lz

@@ -56,6 +56,7 @@ VERBOSE = False  # print fit progress and merge_batches debug output
 TOTAL = "total_counts_per_batch"  # folder name merge_batches.py expects for the summed-counts fit
 MERGE_SCRIPT = (
     REPO_ROOT
+    / "third_party"
     / "Bonsai-data-representation"
     / "optional_preprocessing"
     / "batch_correction"

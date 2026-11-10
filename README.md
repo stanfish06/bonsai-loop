@@ -8,10 +8,10 @@ Datasets used for notebooks have been uploaded to zenodo and made public, and th
 
 ## Setup
 
-`Bonsai-data-representation` is included as a git submodule; Sanity comes from the `sanity-py` package:
+`Bonsai-data-representation` is included as a git submodule under `third_party/`; Sanity comes from the `sanity-py` package:
 
 ```bash
-git submodule update --init Bonsai-data-representation
+git submodule update --init third_party/Bonsai-data-representation
 ```
 
 `packages/pybonsai` (C++ Bonsai bindings, used by `bonsai_lib.get_pdists_posterior`)

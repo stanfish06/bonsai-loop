@@ -1,5 +1,5 @@
 [submodule "Bonsai-data-representation"]
-	path = Bonsai-data-representation
+	path = third_party/Bonsai-data-representation
 	url = https://github.com/dhdegroot/Bonsai-data-representation.git
 [submodule "packages/pybonsai/third_party/penjing"]
 	path = packages/pybonsai/third_party/penjing
@@ -12,3 +12,6 @@
 	path = third_party/supercellstates
 	url = git@github.com:deGrootGroup/supercellstates.git
 	branch = single_loop
+[submodule "third_party/pipeline"]
+	path = third_party/pipeline
+	url = git@github.com:deGrootGroup/pipeline.git

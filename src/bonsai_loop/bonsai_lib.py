@@ -5,7 +5,9 @@ from typing import Any, Callable, Literal, Union
 import numpy as np
 from scipy.spatial.distance import squareform
 
-_BONSAI = Path(__file__).resolve().parents[2] / "Bonsai-data-representation"
+_BONSAI = (
+    Path(__file__).resolve().parents[2] / "third_party" / "Bonsai-data-representation"
+)
 if str(_BONSAI) not in sys.path:
     sys.path.insert(0, str(_BONSAI))
 
