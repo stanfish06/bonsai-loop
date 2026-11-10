@@ -2,7 +2,7 @@
 
 Build the executable first with `make bonsai` (on NixOS: `nix develop -c make bonsai`).
 Input is a Sanity folder from scripts/run_sanity.py, or a merged multi-batch folder from
-Bonsai's merge_batches.py (set INPUT_IS_SANITY_OUTPUT = False for that).
+scripts/run_sanity_multibatch.py; which one it is gets detected from the files.
 
 Usage: uv run python scripts/run_bonsai.py [data_dir] [out_dir]
 """
@@ -31,7 +31,8 @@ OUT_DIR = Path(
 BONSAI = REPO_ROOT / "build" / "bonsai" / "bonsai"  # built by `make bonsai`
 # True: DATA_DIR is Sanity output, and Bonsai divides Sanity's prior back out.
 # False: DATA_DIR holds plain means and standard deviations (merged batches).
-INPUT_IS_SANITY_OUTPUT = True
+# None: Sanity output if DATA_DIR has a sanity_command.txt, otherwise plain.
+INPUT_IS_SANITY_OUTPUT = None
 # keep genes whose z-score exceeds this; the Bonsai authors use 1, the Python-Bonsai
 # tree of this dataset used 0.75
 ZSCORE = 1.0
@@ -46,6 +47,13 @@ EXTRA_ARGS: list[str] = []  # further options, e.g. ["--num-neighbours", "20"]
 
 if not BONSAI.is_file():
     raise SystemExit(f"{BONSAI} not found; run `make bonsai` first")
+sanity_input = INPUT_IS_SANITY_OUTPUT
+if sanity_input is None:
+    sanity_input = (DATA_DIR / "sanity_command.txt").exists()
+    if not sanity_input and not (DATA_DIR / "features.txt").exists():
+        raise SystemExit(
+            f"{DATA_DIR} holds neither sanity_command.txt nor features.txt"
+        )
 final_tree = OUT_DIR / "final_bonsai_tree"
 if final_tree.exists() and PICKUP is None and not OVERWRITE:
     raise SystemExit(
@@ -60,7 +68,7 @@ command = [
 ]  # fmt: skip
 if PICKUP is None:
     command += ["--data", str(DATA_DIR), "--zscore", str(ZSCORE)]
-    if INPUT_IS_SANITY_OUTPUT:
+    if sanity_input:
         command.append("--input-is-sanity-output")
 else:
     # preprocessing is skipped on pickup, so the input folder and z-score are not passed
