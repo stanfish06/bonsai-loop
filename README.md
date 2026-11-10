@@ -1,7 +1,5 @@
 # Bonsai loop
 
-[![lint](https://github.com/stanfish06/bonsai-loop/actions/workflows/lint.yml/badge.svg)](https://github.com/stanfish06/bonsai-loop/actions/workflows/lint.yml)
-
 Trajectory analysis of human 2D gastruloid data using the package [Bonsai-data-representation](https://github.com/dhdegroot/Bonsai-data-representation.git).
 
 ## Data
@@ -10,19 +8,17 @@ Datasets used for notebooks have been uploaded to zenodo and made public, and th
 
 ## Setup
 
-Two required packages (`Sanity` and `Bonsai-data-representation`) are included as git submodules:
+`Bonsai-data-representation` is included as a git submodule; Sanity comes from the `sanity-py` package:
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init Bonsai-data-representation
 ```
+
+`packages/pybonsai` (C++ Bonsai bindings, used by `bonsai_lib.get_pdists_posterior`)
 
 ### System requirements
 
-PyTables (`tables`) builds from source on apple arm chip (might not have wheel):
-
-```bash
-brew install hdf5 c-blosc lzo bzip2
-```
+Python 3.12 or 3.13; `uv sync` downloads one if needed.
 
 ### Install uv
 
@@ -44,6 +40,14 @@ uv sync
 ./activate-venv
 # or
 source activate-venv
+```
+
+### Git hooks
+
+Formatting and linting run as [lefthook](https://lefthook.dev) hooks:
+
+```bash
+lefthook install
 ```
 
 ### Register an IPython kernel *(optional)*

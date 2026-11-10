@@ -5,9 +5,13 @@ build/
 dist/
 wheels/
 *.egg-info
+data/
 
 # Virtual environments
 .venv
 
 *.tar.gz
+
+# reference outputs written by packages/pybonsai/scripts
+packages/pybonsai/results/
 *~

@@ -1,8 +1,9 @@
 import sys
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Union
 
 import numpy as np
+from scipy.spatial.distance import squareform
 
 _BONSAI = Path(__file__).resolve().parents[2] / "Bonsai-data-representation"
 if str(_BONSAI) not in sys.path:
@@ -315,10 +316,74 @@ def get_pdists_on_tree_euclidean(
     )
 
 
+def get_pdists_posterior(
+    bonsai_output_folder,
+    cell_ids,
+    *,
+    with_uncertainty: bool = False,
+    threads: int = 0,
+) -> Union[np.ndarray, tuple[np.ndarray, np.ndarray]]:
+    """
+    Pairwise posterior distances between cell_ids, in the same units as
+    ``get_pdists_on_tree``.
+
+    Per pair this is the posterior mean of the true mean squared distance,
+    (1/G) * sum_g [(x_a - x_b)^2 + var_a + var_b - 2 cov_ab]: the squared
+    distance between posterior means plus the posterior variance of their
+    difference. ``get_bonsai_euclidean_distances`` keeps only the first term,
+    which underestimates the distance because posterior means vary less than
+    the positions they estimate. Subtracting ``get_pdists_on_tree`` gives the
+    convergence residual; negative means closer than the tree allows.
+
+    Computed by the pybonsai extension in packages/pybonsai.
+
+    Parameters
+    ----------
+    bonsai_output_folder
+        Final Bonsai output folder (Python or C++ Bonsai). For Python Bonsai
+        output, ``processedDatafolder`` in its metadata.json must exist.
+    cell_ids
+        Node ids to include in the distance matrix.
+    with_uncertainty
+        Also return the standard deviation of each distance estimate.
+    threads
+        OpenMP threads; 0 uses the default.
+
+    Returns
+    -------
+    Condensed distances in ``cell_ids`` order, or ``(distances, std)`` when
+    ``with_uncertainty`` is set.
+    """
+    try:
+        from pybonsai import BonsaiOutput
+    except ImportError as error:
+        raise ImportError(
+            "get_pdists_posterior needs the pybonsai C++ extension "
+            "(packages/pybonsai), which is not built in this environment."
+        ) from error
+
+    cell_ids = list(cell_ids)
+    result = BonsaiOutput(bonsai_output_folder).posterior_distances(
+        nodes=cell_ids, threads=threads, with_uncertainty=with_uncertainty
+    )
+    # pybonsai reports nodes in its own order; put pairs back in cell_ids order
+    row_of_id = {node_id: row for row, node_id in enumerate(result.node_ids)}
+    order = np.array([row_of_id[node_id] for node_id in cell_ids], dtype=np.intp)
+
+    def reorder(condensed: np.ndarray) -> np.ndarray:
+        return squareform(squareform(condensed)[np.ix_(order, order)], checks=False)
+
+    # uncertainty is None unless with_uncertainty was set
+    if result.uncertainty is None:
+        return reorder(result.values)
+    return reorder(result.values), reorder(result.uncertainty)
+
+
 __all__ = [
     "Layout_Tree",
     "bonsai_clustering",
     "get_bonsai_euclidean_distances",
     "get_pdists_on_tree",
     "get_pdists_on_tree_euclidean",
+    "get_pdists_posterior",
 ]

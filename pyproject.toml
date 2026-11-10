@@ -12,52 +12,61 @@ authors = [
   { name = "Daan de Groot", email = "daanhugodegroot@gmail.com" },
   { name = "Idse Heemskerk", email = "idse.heemskerk@gmail.com" },
 ]
-requires-python = ">=3.9,<3.10"
+requires-python = ">=3.12,<3.14"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
   "dtne>=0.5.1",
   "faicons==0.2.2",
-  "h5py==3.11",
-  "jinja2==3.1.3",
+  "h5py==3.16",
+  "jinja2==3.1.6",
   "jupyterlab>=4.5.6",
   # bonsai-scout
-  "matplotlib==3.8.4",
+  "matplotlib==3.11",
   # bonsai requirements
   "natsort==8.4",
+  # Bonsai pins 2.4.6; the range lets Intel macs resolve, where sanity-py caps numba and so numpy below 2.4
+  "numpy>=2.3,<2.5",
+  "pandas==3.0.3",
   "phate>=2",
-  "psutil==7.1.3",
-  "ruamel-yaml==0.18.6",
+  "psutil==7.2.2",
+  # C++ Bonsai bindings, workspace member in packages/pybonsai
+  "pybonsai",
+  "ruamel-yaml==0.19.1",
+  # Sanity bindings, used by bonsai_loop.sanity
+  "sanity-py>=0.1.4",
   "scanpy>=1.10.3",
-  "scikit-learn==1.5.2",
-  "scipy==1.13.1",
-  "shiny==0.9",
-  "shinyswatch==0.6.1",
-  "tables==3.9.2",
+  "scikit-learn==1.9",
+  "scipy==1.17.1",
+  "shiny==1.6.3",
+  "shinyswatch==0.11",
+  "tables==3.11.1",
 ]
 
 [dependency-groups]
 dev = [
   "pyrefly>=1.1.1",
   "pyright>=1.1.411",
+  "pytest>=8",
   "ruff>=0.15.20",
   "types-networkx>=3.4.2.20250509",
   "types-tqdm>=4.67.3.20260205",
 ]
 
+[tool.uv]
+sources.pybonsai = { workspace = true }
+workspace.members = [ "packages/*" ]
+
 [tool.ruff]
 line-length = 88
 exclude = [
   "Bonsai-data-representation",
-  "Sanity",
+  "packages/pybonsai/third_party",
 ]
-# this is needed in case need to build pytables locally (e.g. for arm)
 lint.per-file-ignores."src/bonsai_loop/bonsai_lib.py" = [ "E402" ]
 
-[tool.uv]
-build-constraint-dependencies = [
-  "blosc2<2.6.2",
-  "numpy<2",
-]
+[tool.pytest]
+ini_options.testpaths = [ "tests", "packages/pybonsai/tests" ]

@@ -1,0 +1,33 @@
+# Git hooks; install once with `lefthook install`.
+# --no-sync keeps uv from rebuilding packages/pybonsai inside a hook.
+
+pre-commit:
+  # jobs run one after another: docformatter and ruff rewrite the same files
+  jobs:
+    - name: docformatter
+      glob: "src/bonsai_loop/*.py"
+      stage_fixed: true
+      # docformatter exits non-zero when it rewrites a file
+      run: uvx docformatter --in-place --pre-summary-newline --wrap-summaries 88 --wrap-descriptions 88 {staged_files} || true
+    - name: ruff
+      glob: "*.{py,pyi}"
+      stage_fixed: true
+      run: uv run --no-sync ruff check --fix {staged_files} && uv run --no-sync ruff format {staged_files}
+    - name: ruff notebooks
+      glob: "*.ipynb"
+      stage_fixed: true
+      # notebooks are formatted and auto-fixed, but lint errors left in cells do not block a commit
+      run: uv run --no-sync ruff check --fix --exit-zero {staged_files} && uv run --no-sync ruff format {staged_files}
+    - name: pyproject-fmt
+      glob: "{pyproject.toml,packages/*/pyproject.toml}"
+      stage_fixed: true
+      run: uvx pyproject-fmt {staged_files} || true
+
+pre-push:
+  jobs:
+    # type checks report but never block the push
+    - name: typecheck
+      run: |
+        uv run --no-sync pyright src tests scripts packages/pybonsai/src packages/pybonsai/tests || true
+        uv run --no-sync pyrefly check src/ || true
+        uv run --no-sync --with mypy mypy --ignore-missing-imports src/ || true

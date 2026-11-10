@@ -1,6 +1,10 @@
 [submodule "Bonsai-data-representation"]
 	path = Bonsai-data-representation
 	url = https://github.com/dhdegroot/Bonsai-data-representation.git
-[submodule "Sanity"]
-	path = Sanity
-	url = https://github.com/stanfish06/Sanity.git
+[submodule "packages/pybonsai/third_party/penjing"]
+	path = packages/pybonsai/third_party/penjing
+	url = git@github.com:deGrootGroup/penjing.git
+	branch = gastruloid_distances
+[submodule "packages/pybonsai/third_party/bonsai_port"]
+	path = packages/pybonsai/third_party/bonsai_port
+	url = git@github.com:deGrootGroup/bonsai_port.git

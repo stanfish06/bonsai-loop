@@ -1,0 +1,42 @@
+[build-system]
+build-backend = "scikit_build_core.build"
+requires = [ "cython>=3", "cython-cmake>=0.2", "scikit-build-core>=0.10" ]
+
+[project]
+name = "pybonsai"
+version = "0.1.0"
+description = "Python bindings for the C++ Bonsai stack (bonsai_port and penjing)"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = [ "numpy>=1.24" ]
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+# Keep the CMake build tree between builds so upstream is compiled once.
+build-dir = "build/{wheel_tag}"
+wheel.packages = [ "src/pybonsai" ]
+# Ship only the compiled module and __init__.py; the sdist must never carry upstream sources.
+wheel.exclude = [ "**.pyx", "**.cpp", "**.hpp" ]
+sdist.exclude = [ "third_party" ]
+
+[tool.uv]
+# Rebuild when the binding sources change or the submodules get checked out. A submodule
+# pin change needs `uv sync --reinstall-package pybonsai`.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "CMakeLists.txt" },
+  { file = "src/pybonsai/*.pyx" },
+  { file = "src/pybonsai/*.cpp" },
+  { file = "src/pybonsai/*.hpp" },
+  { file = "third_party/penjing/CMakeLists.txt" },
+  { file = "third_party/bonsai_port/CMakeLists.txt" },
+]

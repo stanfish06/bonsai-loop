@@ -1,7 +1,8 @@
 project-excludes = [
     "Bonsai-data-representation",
-    "Sanity",
+    "packages/pybonsai/third_party",
+    "packages/pybonsai/build",
     ".venv",
 ]
-search-path = ["Bonsai-data-representation"]
+search-path = ["Bonsai-data-representation", "packages/pybonsai/src"]
 infer-with-first-use = false
