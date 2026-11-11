@@ -1,4 +1,4 @@
-"""Tests for bonsai_loop.sanity.export_for_bonsai.
+"""Tests for bonsai_loop.sanity: counts_from_adata and export_for_bonsai.
 
 Two tests need external binaries and are skipped unless these are set:
 SANITY_BIN (Sanity >= 2.0 command-line tool) and LIBBONSAI_BIN (bonsai_port's
@@ -9,10 +9,17 @@ import os
 import subprocess
 
 import numpy as np
+import pandas as pd
 import pysanity
 import pytest
+import scipy.sparse as sp
+from anndata import AnnData
 
-from bonsai_loop.sanity import SANITY_KERNEL_VERSION, export_for_bonsai
+from bonsai_loop.sanity import (
+    SANITY_KERNEL_VERSION,
+    counts_from_adata,
+    export_for_bonsai,
+)
 
 N_GENES, N_CELLS = 40, 30
 
@@ -242,3 +249,63 @@ def test_libbonsai_reads_export(result, ids, tmp_path, file_format):
     first = dict(zip(columns, summary[1].split("\t")))
     assert int(first["input_features"]) == N_GENES
     assert int(first["samples"]) == N_CELLS
+
+
+@pytest.fixture
+def adata(counts, ids):
+    """Log-normalised X, with the raw counts in a sparse layer and three obsm entries."""
+    gene_ids, cell_ids = ids
+    cells_by_genes = counts.T
+    data = AnnData(
+        np.log1p(cells_by_genes),
+        obs=pd.DataFrame(index=cell_ids),
+        var=pd.DataFrame(index=gene_ids),
+    )
+    data.layers["counts"] = sp.csr_matrix(cells_by_genes.astype(np.float32))
+    data.obsm["counts"] = cells_by_genes.astype(np.int64)
+    data.obsm["table"] = pd.DataFrame(
+        cells_by_genes, index=cell_ids, columns=[f"t_{g}" for g in range(N_GENES)]
+    )
+    data.obsm["narrow"] = cells_by_genes[:, :5].astype(np.int64)
+    return data
+
+
+def test_counts_from_adata_slots(adata, counts, ids):
+    gene_ids, _ = ids
+    raw_in_x = AnnData(sp.csr_matrix(counts.T), var=pd.DataFrame(index=gene_ids))
+    for data, source, key in [
+        (raw_in_x, "X", None),
+        (adata, "layer", "counts"),
+        (adata, "obsm", "counts"),
+    ]:
+        values, names = counts_from_adata(data, source, key)
+        assert values.dtype == np.float64 and values.flags.c_contiguous
+        np.testing.assert_array_equal(values, counts)  # genes x cells
+        assert list(names) == gene_ids
+
+    # a DataFrame in obsm names its own columns
+    values, names = counts_from_adata(adata, "obsm", "table")
+    np.testing.assert_array_equal(values, counts)
+    assert list(names) == [f"t_{g}" for g in range(N_GENES)]
+
+    # an obsm array of another width than var gets numbered ids
+    values, names = counts_from_adata(adata, "obsm", "narrow")
+    np.testing.assert_array_equal(values, counts[:5])
+    assert list(names) == [f"narrow_{g}" for g in range(5)]
+
+
+def test_counts_from_adata_rejects_bad_input(adata):
+    with pytest.raises(ValueError, match="whole numbers"):
+        counts_from_adata(adata)  # X is log-normalised
+    values, _ = counts_from_adata(adata, allow_non_integer=True)
+    np.testing.assert_allclose(values, np.asarray(adata.X).T)
+
+    adata.layers["negative"] = -np.asarray(adata.obsm["counts"])
+    with pytest.raises(ValueError, match="negative"):
+        counts_from_adata(adata, "layer", "negative")
+    with pytest.raises(KeyError, match="available: counts"):
+        counts_from_adata(adata, "layer", "absent")
+    with pytest.raises(ValueError, match="needs a key"):
+        counts_from_adata(adata, "obsm")
+    with pytest.raises(ValueError, match="key applies"):
+        counts_from_adata(adata, "X", "counts")

@@ -1,77 +1,161 @@
-"""Run Sanity on a count table and write the result as a Sanity folder for Bonsai.
+"""Run Sanity on the raw counts of an AnnData and write a Sanity folder for Bonsai.
 
 Uses the sanity-py bindings (``pysanity.fit``) and
 ``bonsai_loop.sanity.export_for_bonsai``.
 
-Usage: uv run python scripts/run_sanity.py [counts_tsv] [out_dir]
+Usage:
+    uv run python scripts/run_sanity.py adata.h5ad                       # counts in X
+    uv run python scripts/run_sanity.py adata.h5ad --counts layer --key counts
+    uv run python scripts/run_sanity.py adata.h5ad --counts obsm --key raw_counts
+    uv run python scripts/run_sanity.py Gene_table.txt                   # count table
 """
 
-import sys
+import argparse
 import time
 from pathlib import Path
 
+import anndata
 import pandas as pd
 import pysanity
 
-from bonsai_loop.sanity import export_for_bonsai
+from bonsai_loop.sanity import counts_from_adata, export_for_bonsai
 
 # ---- options -------------------------------------------------------------
-# count table: genes x cells, tab-separated, gene ids in the first column, cell ids in the header
-COUNTS_TSV = Path(
-    sys.argv[1]
-    if len(sys.argv) > 1
-    else "/home/stan/Git/micropattern/notebooks/heemskerk_data/adata_timeseries_old_48h-1_raw_expr_hvg.tsv"
+parser = argparse.ArgumentParser(
+    description="Run Sanity on the raw counts of an AnnData and write a Sanity folder for Bonsai.",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
-# output folder; default sits next to the count table
-OUT_DIR = Path(
-    sys.argv[2]
-    if len(sys.argv) > 2
-    else COUNTS_TSV.with_name(f"{COUNTS_TSV.stem}_sanity")
+parser.add_argument(
+    "input",
+    type=Path,
+    help="a .h5ad file; any other file is read as a tab-separated genes x cells count "
+    "table with gene ids in the first column and cell ids in the header",
 )
-# how Sanity picks each gene's variance: "MAP" (Sanity 2 default, recommended by Bonsai),
-# "MLE" (matches runs of older Sanity with `-max_v true`) or "EAP". Bonsai rejects "MARG".
-VARIANCE_METHOD = "MAP"
-# "txt": read by the Python Bonsai and every bonsai_port version.
-# "npy": Sanity's Bonsai output mode, smaller and faster, read by bonsai_port from 4387156 on.
-FILE_FORMAT = "txt"
-N_THREADS = 12  # OpenMP threads for the fit
-DROP_EMPTY = True  # drop genes and cells without counts; Sanity cannot fit them
-OVERWRITE = False  # replace Sanity output already in OUT_DIR
-VERBOSE = True  # print fit progress
+parser.add_argument(
+    "--counts",
+    choices=["X", "layer", "obsm"],
+    default="X",
+    help="where the .h5ad holds the raw counts",
+)
+parser.add_argument(
+    "--key",
+    help="name of the layer or obsm entry; required with --counts layer or obsm",
+)
+parser.add_argument(
+    "--out",
+    type=Path,
+    help="output folder; default <input stem>_sanity next to the input",
+)
+parser.add_argument(
+    "--variance-method",
+    choices=["MAP", "MLE", "EAP"],
+    default="MAP",
+    help="how Sanity picks each gene's variance: MAP is the Sanity 2 default and what "
+    "Bonsai recommends, MLE matches older Sanity with `-max_v true`",
+)
+parser.add_argument(
+    "--format",
+    choices=["txt", "npy"],
+    default="txt",
+    help="txt is read by the Python Bonsai and every bonsai_port version; npy is "
+    "Sanity's Bonsai output mode, read by bonsai_port from 4387156 on",
+)
+parser.add_argument(
+    "--threads", type=int, default=12, help="OpenMP threads for the fit"
+)
+parser.add_argument(
+    "--drop-empty",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="drop genes and cells without counts, which Sanity cannot fit; "
+    "--no-drop-empty stops instead",
+)
+parser.add_argument(
+    "--allow-non-integer",
+    action="store_true",
+    help="fit values that are not whole numbers instead of stopping",
+)
+parser.add_argument(
+    "--overwrite", action="store_true", help="replace Sanity output already in --out"
+)
+parser.add_argument(
+    "--verbose",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="print fit progress",
+)
+args = parser.parse_args()
 # --------------------------------------------------------------------------
 
-counts = pd.read_csv(COUNTS_TSV, sep="\t", index_col=0)
-print(f"{COUNTS_TSV}: {counts.shape[0]} genes x {counts.shape[1]} cells")
+out_dir = args.out or args.input.with_name(f"{args.input.stem}_sanity")
+# stop before the fit rather than after it
+if not args.overwrite and any(
+    (out_dir / name).exists()
+    for name in ("sanity_command.txt", "delta.txt", "delta.npy")
+):
+    parser.error(f"{out_dir} already holds Sanity output; pass --overwrite")
+
+if args.input.suffix == ".h5ad":
+    adata = anndata.read_h5ad(args.input)
+else:
+    if args.counts != "X" or args.key is not None:
+        parser.error("--counts and --key apply to .h5ad input only")
+    table = pd.read_csv(args.input, sep="\t", index_col=0)
+    adata = anndata.AnnData(
+        table.to_numpy().T,
+        obs=pd.DataFrame(index=table.columns.astype(str)),
+        var=pd.DataFrame(index=table.index.astype(str)),
+    )
+try:
+    # stops on values that are not raw counts, e.g. a log-normalised X
+    counts, gene_ids = counts_from_adata(
+        adata, args.counts, args.key, allow_non_integer=args.allow_non_integer
+    )
+except (KeyError, ValueError) as error:
+    parser.error(f"{args.input}: {error.args[0]}")
+cell_ids = adata.obs_names.astype(str)
+if args.input.suffix != ".h5ad":
+    source = "table"
+elif args.key is None:
+    source = "X"
+else:
+    source = f"{args.counts} {args.key!r}"
+print(f"{args.input} ({source}): {counts.shape[0]} genes x {counts.shape[1]} cells")
+if not gene_ids.equals(adata.var_names.astype(str)):
+    print(f"gene ids come from {source}: {gene_ids[0]}, ...")
 
 empty_genes = counts.sum(axis=1) <= 0
 empty_cells = counts.sum(axis=0) <= 0
 if empty_genes.any() or empty_cells.any():
-    if not DROP_EMPTY:
+    if not args.drop_empty:
         raise SystemExit(
-            f"{int(empty_genes.sum())} genes and {int(empty_cells.sum())} cells have no counts; "
-            "set DROP_EMPTY = True or remove them"
+            f"{int(empty_genes.sum())} genes and {int(empty_cells.sum())} cells have no "
+            "counts; remove them or drop --no-drop-empty"
         )
-    counts = counts.loc[~empty_genes, ~empty_cells]
+    counts = counts[~empty_genes][:, ~empty_cells]
+    gene_ids, cell_ids = gene_ids[~empty_genes], cell_ids[~empty_cells]
     print(
         f"dropped {int(empty_genes.sum())} genes and {int(empty_cells.sum())} cells without counts"
     )
 
 start = time.time()
 result = pysanity.fit(
-    counts.to_numpy(),
-    variance_method=VARIANCE_METHOD,
-    n_threads=N_THREADS,
-    verbose=VERBOSE,
+    counts,
+    variance_method=args.variance_method,
+    n_threads=args.threads,
+    verbose=args.verbose,
 )
-print(f"fit took {time.time() - start:.1f} s ({VARIANCE_METHOD}, {N_THREADS} threads)")
+print(
+    f"fit took {time.time() - start:.1f} s ({args.variance_method}, {args.threads} threads)"
+)
 
 export_for_bonsai(
     result,
-    counts.index,
-    counts.columns,
-    OUT_DIR,
-    variance_method=VARIANCE_METHOD,
-    file_format=FILE_FORMAT,
-    overwrite=OVERWRITE,
+    gene_ids,
+    cell_ids,
+    out_dir,
+    variance_method=args.variance_method,
+    file_format=args.format,
+    overwrite=args.overwrite,
 )
-print(f"wrote {OUT_DIR} ({FILE_FORMAT})")
+print(f"wrote {out_dir} ({args.format})")

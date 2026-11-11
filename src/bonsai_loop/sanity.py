@@ -1,4 +1,5 @@
-"""Write sanity-py results in the folder layout Bonsai reads as Sanity output."""
+"""Read raw counts for sanity-py and write its results in the folder layout Bonsai
+reads."""
 
 from collections.abc import Iterable
 from datetime import datetime
@@ -7,6 +8,9 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+import pandas as pd
+import scipy.sparse as sp
+from anndata import AnnData
 from pysanity import SanityResult, VarianceMethod
 
 # Sanity version of the kernel bundled in sanity-py, which does not expose it.
@@ -18,9 +22,87 @@ SANITY_KERNEL_VERSION = "2.0.0"
 BONSAI_VARIANCE_METHODS = ("MAP", "MLE", "EAP")
 
 FileFormat = Literal["npy", "txt"]
+CountsSource = Literal["X", "layer", "obsm"]
 _ARRAY_STEMS = ("delta", "d_delta", "mu", "variance")
 _ID_FILES = ("geneID.txt", "cellID.txt")
 _COMMAND_FILE = "sanity_command.txt"
+
+
+def counts_from_adata(
+    adata: AnnData,
+    source: CountsSource = "X",
+    key: str | None = None,
+    *,
+    allow_non_integer: bool = False,
+) -> tuple[np.ndarray, pd.Index]:
+    """
+    Raw counts of an AnnData as the dense genes x cells array ``pysanity.fit`` takes.
+
+    Parameters
+    ----------
+    adata
+        Cells x genes.
+    source
+        Where the raw counts are: ``"X"``, ``"layer"`` or ``"obsm"``.
+    key
+        Name of the layer or obsm entry; needed for those two and not allowed for X.
+    allow_non_integer
+        Accept values that are not whole numbers. By default they raise, since
+        they usually mean the slot holds normalised values.
+
+    Returns
+    -------
+    counts
+        float64, genes x cells; the columns follow ``adata.obs_names``.
+    gene_ids
+        One id per row: ``adata.var_names``, or the column names of a DataFrame
+        in obsm, or ``<key>_0``, ``<key>_1``, ... for an obsm array whose width
+        differs from ``adata.n_vars``.
+    """
+    if source == "X":
+        if key is not None:
+            raise ValueError("key applies to source 'layer' or 'obsm' only")
+        where, matrix = "X", adata.X
+        if matrix is None:
+            raise ValueError("adata.X is empty; take the counts from a layer or obsm")
+    elif source in ("layer", "obsm"):
+        if key is None:
+            raise ValueError(f"source {source!r} needs a key")
+        slots = adata.layers if source == "layer" else adata.obsm
+        where = f"{source} {key!r}"
+        if key not in slots:
+            # newer anndata lists X among the layers under the key None
+            names = [name for name in slots.keys() if name is not None]
+            raise KeyError(
+                f"adata has no {where}; available: {', '.join(names) or 'none'}"
+            )
+        matrix = slots[key]
+    else:
+        raise ValueError(f"source must be 'X', 'layer' or 'obsm', not {source!r}")
+
+    gene_ids = adata.var_names
+    if isinstance(matrix, pd.DataFrame):
+        # a table in obsm names its own columns
+        gene_ids = matrix.columns
+        matrix = matrix.to_numpy()
+    dense = (
+        sp.csr_matrix(matrix).toarray() if sp.issparse(matrix) else np.asarray(matrix)
+    )
+    if dense.ndim != 2:
+        raise ValueError(f"{where} is not a cells x genes matrix")
+    if dense.shape[1] != len(gene_ids):
+        # an obsm array of another width than var has no gene names to take
+        gene_ids = pd.Index([f"{key}_{column}" for column in range(dense.shape[1])])
+
+    counts = np.ascontiguousarray(dense.T, dtype=np.float64)
+    if not np.isfinite(counts).all() or (counts < 0).any():
+        raise ValueError(f"{where} holds negative or non-finite values, not raw counts")
+    if not allow_non_integer and (counts != np.round(counts)).any():
+        raise ValueError(
+            f"{where} holds values that are not whole numbers, so it does not look "
+            "like raw counts"
+        )
+    return counts, pd.Index(gene_ids).astype(str)
 
 
 def export_for_bonsai(

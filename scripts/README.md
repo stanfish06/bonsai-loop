@@ -1,8 +1,11 @@
 The `.py` scripts are current.
 
-- `run_sanity.py`: fit Sanity on a count table with sanity-py and write a Sanity folder that Bonsai reads.
+- `run_sanity.py`: fit Sanity on the raw counts of a `.h5ad` with sanity-py and write a Sanity folder that
+  Bonsai reads. `--counts X|layer|obsm` and `--key NAME` say where the counts are; a tab-separated
+  count table also works. `--help` lists the options.
 - `run_sanity_multibatch.py`: fit Sanity per batch and merge the batches with the Python Bonsai's
-  `merge_batches.py`; writes a merged `bonsai_in` folder.
+  `merge_batches.py`; writes a merged `bonsai_in` folder. Takes a `.h5ad` with `--batch-key OBS_COLUMN`
+  and the same `--counts`/`--key` options, or a count table with `--batch-annotation FILE`.
 - `run_bonsai.py`: build a tree from either folder with the C++ Bonsai. Build it once with `make bonsai`.
 - `run_cellstates.py`: cluster cells into cellstates; writes `optimized_clusters.txt` and the aggregated
   `Gene_table.txt`. Build the executable once with `make cellstates`.
