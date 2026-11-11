@@ -41,6 +41,7 @@ dependencies = [
   "sanity-py>=0.1.4",
   "scanpy>=1.10.3",
   "scikit-learn==1.9",
+  "scikit-misc>=0.5.3",
   "scipy==1.17.1",
   "shiny==1.6.3",
   "shinyswatch==0.11",
