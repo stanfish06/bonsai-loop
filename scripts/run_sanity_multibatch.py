@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import pysanity
 
-from bonsai_loop.sanity import counts_from_adata, export_for_bonsai
+from bonsai_loop.sanity import bonsai_batch_ids, counts_from_adata, export_for_bonsai
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -159,12 +159,14 @@ if args.batch_key is not None:
             f"{args.input} has no obs column {args.batch_key!r}; available: "
             + (", ".join(map(str, adata.obs.columns)) or "none")
         )
-    batch_of_cell = adata.obs[args.batch_key]
-    if batch_of_cell.isna().to_numpy().any():
-        parser.error(f"obs column {args.batch_key!r} has missing values")
-    batch_of_cell = pd.Series(
-        batch_of_cell.astype(str).to_numpy(), index=counts.columns
-    )
+    try:
+        # numeric batch labels get the column name as a prefix
+        batch_of_cell = pd.Series(
+            bonsai_batch_ids(pd.Series(adata.obs[args.batch_key]), args.batch_key),
+            index=counts.columns,
+        )
+    except ValueError as error:
+        parser.error(str(error))
     annotation_file = out_dir / "batch_annotation.tsv"
 else:
     annotation_file = args.batch_annotation or args.input.with_name(

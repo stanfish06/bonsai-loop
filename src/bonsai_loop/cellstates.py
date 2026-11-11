@@ -18,6 +18,8 @@ import scipy.sparse as sp
 from anndata import AnnData
 from scipy.io import mmwrite
 
+from .sanity import bonsai_batch_ids
+
 # built by `make cellstates`; the CELLSTATES_BIN environment variable overrides it
 DEFAULT_EXECUTABLE = (
     Path(__file__).resolve().parents[2] / "build" / "cellstates" / "cellstates"
@@ -130,10 +132,7 @@ def cellstates(
     else:
         if batch_key not in adata.obs:
             raise KeyError(f"adata.obs has no column {batch_key!r}")
-        batches = adata.obs[batch_key]
-        if batches.isna().to_numpy().any():
-            raise ValueError(f"adata.obs[{batch_key!r}] has missing values")
-        batch_of_cell = batches.astype(str).to_numpy()
+        batch_of_cell = bonsai_batch_ids(pd.Series(adata.obs[batch_key]), batch_key)
         runs = [
             (batch, np.flatnonzero(batch_of_cell == batch))
             for batch in sorted(set(batch_of_cell))
@@ -275,7 +274,8 @@ def export_cellstates(
       for the cells in kept cellstates.
 
     - ``batch_annotation.tsv``, only with ``batch_key``: cellstate id and batch per
-      line, tab-separated without header. scripts/run_sanity_multibatch.py takes
+      line, tab-separated without header. Numeric batch labels get the column
+      name as a prefix (see :func:`bonsai_loop.sanity.bonsai_batch_ids`). scripts/run_sanity_multibatch.py takes
       it with ``Gene_table.txt``.
 
     Cellstate ids in these files are ``cs_0``, ``cs_1``, ... over the kept
@@ -339,7 +339,7 @@ def export_cellstates(
     if batch_key is not None:
         if batch_key not in adata.obs:
             raise KeyError(f"adata.obs has no column {batch_key!r}")
-        batch_of_cell = adata.obs[batch_key].astype(str).to_numpy()
+        batch_of_cell = bonsai_batch_ids(pd.Series(adata.obs[batch_key]), batch_key)
         # batch of each cellstate, taken from its first cell
         batch_of_group = batch_of_cell[np.unique(cell_to_group, return_index=True)[1]]
         if (batch_of_group[cell_to_group] != batch_of_cell).any():

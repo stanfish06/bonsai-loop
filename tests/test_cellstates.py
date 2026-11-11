@@ -214,22 +214,30 @@ def test_export_rejects_cellstates_across_batches(labelled, tmp_path):
 
 
 @needs_executable
-def test_cellstates_n_target(two_populations, tmp_path):
-    cellstates(two_populations, threads=2, key_added="fine")
-    n_fine = two_populations.obs["fine"].nunique()
-    assert n_fine > 2
-    cellstates(two_populations, threads=2, n_target=2, work_dir=tmp_path / "work")
-    labels = two_populations.obs["cellstate"]
-    assert labels.nunique() == 2
-    # merging down to two recovers the two populations
-    assert (
-        two_populations.obs.groupby("cellstate", observed=True)["population"].nunique()
-        == 1
-    ).all()
-    assert two_populations.uns["cellstate"]["params"]["n_target"] == 2
-    # one labels file per intermediate number of cellstates
-    assert (tmp_path / "work" / "coarsify" / "clustering_2_clusters.txt").is_file()
+def test_cellstates_n_target(tmp_path):
+    # four populations, each expressing its own quarter of the genes
+    rng = np.random.default_rng(1)
+    n_groups, quarter = 4, N_GENES // 4
+    counts = np.zeros((n_groups * N_PER_GROUP, N_GENES), dtype=np.int64)
+    for group in range(n_groups):
+        rows = slice(group * N_PER_GROUP, (group + 1) * N_PER_GROUP)
+        columns = slice(group * quarter, (group + 1) * quarter)
+        counts[rows, columns] = rng.poisson(20, size=(N_PER_GROUP, quarter))
+    adata = AnnData(sp.csr_matrix(counts))
+
+    cellstates(adata, threads=2, key_added="fine")
+    n_fine = adata.obs["fine"].nunique()
+    assert n_fine >= n_groups
+
+    cellstates(adata, threads=2, n_target=2, work_dir=tmp_path / "work")
+    assert adata.obs["cellstate"].nunique() == 2
+    assert adata.uns["cellstate"]["params"]["n_target"] == 2
+    # merging only joins cellstates: each fine one lies within one coarse one
+    assert (adata.obs.groupby("fine", observed=True)["cellstate"].nunique() == 1).all()
+    # the labels of every intermediate number of cellstates are kept
+    kept = {path.name for path in (tmp_path / "work" / "coarsify").iterdir()}
+    assert {f"clustering_{k}_clusters.txt" for k in range(2, n_fine)} <= kept
 
     # a target above the number found leaves the cellstates as they are
-    cellstates(two_populations, threads=2, n_target=10_000, key_added="unchanged")
-    assert list(two_populations.obs["unchanged"]) == list(two_populations.obs["fine"])
+    cellstates(adata, threads=2, n_target=10_000, key_added="unchanged")
+    assert list(adata.obs["unchanged"]) == list(adata.obs["fine"])

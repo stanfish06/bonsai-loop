@@ -105,6 +105,31 @@ def counts_from_adata(
     return counts, pd.Index(gene_ids).astype(str)
 
 
+def bonsai_batch_ids(labels: pd.Series, name: str) -> np.ndarray:
+    """
+    Batch id of each cell as text that Bonsai's merge_batches.py accepts.
+
+    merge_batches.py reads the ids from a file and builds folder names from them,
+    which fails when every id is a number. Such ids get ``name`` as a prefix:
+    14 in the column ``sample`` becomes ``sample_14``.
+
+    Parameters
+    ----------
+    labels
+        Batch label per cell, e.g. an ``adata.obs`` column.
+    name
+        Prefix for numeric ids; the column name.
+    """
+    if labels.isna().to_numpy().any():
+        raise ValueError(f"batch column {name!r} has missing values")
+    ids = labels.astype(str).to_numpy()
+    unique = pd.Series(np.unique(ids))
+    as_numbers = np.asarray(pd.to_numeric(unique, errors="coerce"), dtype=np.float64)
+    if not np.isnan(as_numbers).any():
+        ids = np.char.add(f"{name}_", ids.astype(str))
+    return ids
+
+
 def export_for_bonsai(
     result: SanityResult,
     gene_ids: Iterable[str],

@@ -25,9 +25,11 @@
             pkgs.ninja
             pkgs.eigen
             pkgs.zlib
+            # cmake fetches nlopt with git
+            pkgs.git
           ];
           # The macOS shell defaults to clang, which has no OpenMP here; build with the gcc above.
-          shellHook = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+          shellHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             export CC=gcc CXX=g++
           '';
         };

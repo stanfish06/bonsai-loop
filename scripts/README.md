@@ -10,7 +10,8 @@ The `.py` scripts are current.
 - `run_cellstates.py`: cluster cells into cellstates; writes `optimized_clusters.txt` and the aggregated
   `Gene_table.txt`. Takes the same input and `--counts`/`--key` options as `run_sanity.py`. With
   `--batch-key OBS_COLUMN` it clusters each batch separately and writes `batch_annotation.tsv` for
-  `run_sanity_multibatch.py`. Build the executable once with `make cellstates`.
+  `run_sanity_multibatch.py`. `--n-target N` merges the cellstates further until N are left, for data
+  where cellstates alone merges almost nothing. Build the executables once with `make cellstates`.
 - `run_bonsai_old_premerged.py`: build a tree with the Python Bonsai, starting from the cellstates of
   `optimized_clusters.txt`; every cell stays a leaf.
 - `check_posterior_pdists.py`: check `bonsai_lib.get_pdists_posterior` on a Bonsai output folder.

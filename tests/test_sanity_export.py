@@ -17,6 +17,7 @@ from anndata import AnnData
 
 from bonsai_loop.sanity import (
     SANITY_KERNEL_VERSION,
+    bonsai_batch_ids,
     counts_from_adata,
     export_for_bonsai,
 )
@@ -309,3 +310,22 @@ def test_counts_from_adata_rejects_bad_input(adata):
         counts_from_adata(adata, "obsm")
     with pytest.raises(ValueError, match="key applies"):
         counts_from_adata(adata, "X", "counts")
+
+
+def test_batch_ids():
+    text = pd.Series(["CS9", "CS11", "CS9"])
+    assert list(bonsai_batch_ids(text, "sample")) == ["CS9", "CS11", "CS9"]
+    # all-numeric ids get the column name as a prefix, whatever their dtype
+    for numeric in (
+        pd.Series([14, 15, 14]),
+        pd.Series(["14", "15", "14"]).astype("category"),
+    ):
+        assert list(bonsai_batch_ids(numeric, "sample")) == [
+            "sample_14",
+            "sample_15",
+            "sample_14",
+        ]
+    # one text id is enough to leave the ids alone
+    assert list(bonsai_batch_ids(pd.Series(["1", "b"]), "sample")) == ["1", "b"]
+    with pytest.raises(ValueError, match="missing"):
+        bonsai_batch_ids(pd.Series(["a", None]), "sample")
