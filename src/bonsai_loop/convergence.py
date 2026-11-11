@@ -894,6 +894,7 @@ def compute_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
     reference_node_ids: list[str] | None = None,
     normalize_by_branch_length: bool = True,
+    bonsai_output_folder=None,
 ) -> None:
     """
     Compute delta deviation scores ΔD for every parent→child branch against every
@@ -903,12 +904,14 @@ def compute_delta_deviation_from_parent(
         y ─── z
          ⋱  ⋰
            x
-    - one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
-        - D_{xy} = tree_d(x, y) - d(x, y)
-            - tree_d(x, y): summed squared euclidean distance along the tree path between node x and y (node x ⎯ closest common ancestor between x and y ⎯ node y)
-            - d(x, y): squared euclidean distance between node x and y
-        - D_{xz} - D_{xy} = [tree_d(x, z) - d(x, z)] - [tree_d(x, y) - d(x, y)]
-                          = ‖z - y‖^2 (the difference between tree paths x⇔z and x⇔y) - ‖x - z‖^2 + ‖x - y‖^2
+    - D_{xy} = tree_d(x, y) - d(x, y)
+        - d(x, y): posterior distance between node x and y, the squared euclidean distance between
+          their posterior means plus the posterior variance of their difference (see bonsai_lib.get_pdists_posterior)
+        - tree_d(x, y): d summed over the branches of the tree path between node x and y (node x ⎯ closest common ancestor between x and y ⎯ node y)
+    - D_{xz} - D_{xy} = [tree_d(x, z) - d(x, z)] - [tree_d(x, y) - d(x, y)]
+                      = d(y, z) (the difference between tree paths x⇔z and x⇔y) - d(x, z) + d(x, y)
+    - without the variance terms one can show that D_{xz} - D_{xy} = 2(x - y)^t(z - y) ∝ cos(θ_xyz)
+        - D_{xz} - D_{xy} = ‖z - y‖^2 - ‖x - z‖^2 + ‖x - y‖^2
                           = (z - y)^t(z - y) - (x - z)^t(x - z) + (x - y)^t(x - y)
                           = z^tz - 2y^tz + y^ty - x^tx + 2x^tz - z^tz + x^tx - 2x^ty + y^ty
                           = 2(y^ty - y^tz + x^tz - x^ty)
@@ -918,35 +921,32 @@ def compute_delta_deviation_from_parent(
     - optionally, normalize (D_{xz} - D_{xy}) by the branch length between y and z
     - this function computes all requested branch-reference pairs. For downstream
       score aggregation, we should probably mask reference nodes that are the parent y, the child z, descendants of z, or ancestors of y.
-        - x = z → D_{xz} - D_{xy} = 2‖z - y‖^2, positive artifact
+        - x = z → D_{xz} - D_{xy} = 2 d(y, z), positive artifact
         - x = y → D_{xz} - D_{xy} = 0, 0 artifact
         - x being a descendant of z or an ancestor of y, which could potentially detect cycles (e.g. x loop back to z despite being descendant of z)
             - out of scope for now
 
     Steps:
-        0. Matrices:
-            - X_m×p: m reference nodes, each with p features/genes
-            - Y_n×p: n parent nodes, each with p features/genes
-            - Z_n×p: n child nodes, each with p features/genes
-            - all matrices will be first divided by sqrt(p)
-        1. V_n×p = Z_n×p - Y_n×p, where row pair i (Zi․, Yi․) represents branch/edge i between the parent yi and child zi
-        2. then, ΔD[i, j] (delta deviation for branch i with respect to reference node j) = 2 (Xj․− Yi․)^t · Vi․ = 2 Xj․^t · Vi․ − 2 Yi․^t · Vi․
-        3. to compute all 2 Yi․^t · Vi․, do row-wise dot product: 2.0 * np.einsum("ij,ij->i", Y, V), yielding 1d array with n elements
-        4. to compute all 2 Xj․^t · Vi․, do regular dot product: 2.0 * V @ X^t, yielding a n by m matrix
-        5. then subtract each column (each reference node) of 2.0 * V @ X^t with 2.0 * np.einsum("ij,ij->i", Y, V): 2.0 * V @ X^t - 2.0 * np.einsum("ij,ij->i", Y, V)[:, None]
-        6. finally get a n by m matrix ΔD
+        1. d(y, z) of every branch i between the parent yi and child zi, a 1d array with n elements
+        2. d(x, node) between every node and every reference node xj, a N by m matrix
+        3. ΔD[i, j] (delta deviation for branch i with respect to reference node j) = d(yi, zi) - d(xj, zi) + d(xj, yi)
+        4. finally get a n by m matrix ΔD
 
     Parameters
     ----------
     node_data_lookup : dict[str, TreeNodeExtraData]
         Map from node id to TreeNodeExtraData. Each tree_node must expose
-        ltqsAIRoot, parentNode, tParent.
+        nodeId, parentNode, tParent.
     reference_node_ids : list[str] | None
         Reference nodes used as columns (the "x" in ΔD). If None, all nodes in
         node_data_lookup are used (asymmetric N × N matrix).
     normalize_by_branch_length : bool
         If True, divide row i by tParent of branch i.
+    bonsai_output_folder
+        Final Bonsai output folder (Python or C++ Bonsai), read by pybonsai. Required.
     """
+    if bonsai_output_folder is None:
+        raise ValueError("bonsai_output_folder is required for delta deviation scores.")
     # if reference node ids provided, use as is, otherwise use all node data map's keys
     ref_ids = (
         list(node_data_lookup)
@@ -959,7 +959,7 @@ def compute_delta_deviation_from_parent(
     branch_nodes: list[tuple[str, TreeNode, TreeNode]] = [
         (nid, nd.tree_node, nd.tree_node.parentNode)
         for nid, nd in node_data_lookup.items()
-        if not nd.tree_node.isRoot and nd.tree_node.parentNode is not None
+        if nd.tree_node.parentNode is not None
     ]
 
     # reset delta deviation
@@ -970,27 +970,23 @@ def compute_delta_deviation_from_parent(
     if not branch_nodes:
         return
 
-    inv_sqrt_d = 1.0 / np.sqrt(len(branch_nodes[0][1].ltqsAIRoot))
-    Z = (
-        np.stack([np.asarray(z.ltqsAIRoot, dtype=float) for _, z, _ in branch_nodes])
-        * inv_sqrt_d
+    output = _load_bonsai_output(bonsai_output_folder)
+    branch_d = np.array(
+        [output.posterior_distance(y.nodeId, z.nodeId) for _, z, y in branch_nodes],
+        dtype=float,
     )
-    Y = (
-        np.stack([np.asarray(y.ltqsAIRoot, dtype=float) for _, _, y in branch_nodes])
-        * inv_sqrt_d
+    node_index = {nid: i for i, nid in enumerate(node_data_lookup)}
+    ref_d = np.array(
+        [
+            [output.posterior_distance(rid, nid) for rid in ref_ids]
+            for nid in node_data_lookup
+        ],
+        dtype=float,
     )
-    V = Z - Y
-    X = (
-        np.stack(
-            [
-                np.asarray(node_data_lookup[rid].tree_node.ltqsAIRoot, dtype=float)
-                for rid in ref_ids
-            ]
-        )
-        * inv_sqrt_d
-    )
+    z_rows = [node_index[nid] for nid, _, _ in branch_nodes]
+    y_rows = [node_index[y.nodeId] for _, _, y in branch_nodes]
 
-    delta_d = 2.0 * (V @ X.T) - 2.0 * np.einsum("ij,ij->i", Y, V)[:, None]
+    delta_d = branch_d[:, None] - ref_d[z_rows] + ref_d[y_rows]
 
     if normalize_by_branch_length:
         print("normalize delta deviation by branch length")
@@ -1414,7 +1410,7 @@ def accumulate_delta_deviation_scores_along_lineage(
     for _ in range(n_steps):
         if direction == "up":
             parent: TreeNode | None = current.parentNode
-            if current.isRoot or parent is None:
+            if parent is None:
                 raise ValueError(
                     f"reached root at {current.nodeId}; cannot take {n_steps} 'up' steps"
                 )
