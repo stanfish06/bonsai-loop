@@ -166,3 +166,70 @@ def test_cellstates_to_sanity_folder(two_populations, tmp_path):
         variance_method="MAP", file_format="txt",
     )  # fmt: skip
     assert (sanity_folder / "cellID.txt").read_text().split() == list(table.columns)
+
+
+@needs_executable
+def test_cellstates_per_batch(two_populations, tmp_path):
+    # batches cut across the two populations, so an unbatched run would mix them
+    two_populations.obs["batch"] = ["b1", "b2"] * N_PER_GROUP
+    cellstates(
+        two_populations, batch_key="batch", threads=2, work_dir=tmp_path / "work"
+    )
+    per_cellstate = two_populations.obs.groupby("cellstate", observed=True)
+    assert (per_cellstate["batch"].nunique() == 1).all()
+    assert (per_cellstate["population"].nunique() == 1).all()
+    assert two_populations.uns["cellstate"]["params"]["batch_key"] == "batch"
+    assert {"b1", "b2"} == {path.name for path in (tmp_path / "work").iterdir()}
+
+    folder = export_cellstates(two_populations, tmp_path / "out", batch_key="batch")
+    annotation = pd.read_csv(
+        folder / "batch_annotation.tsv", sep="\t", header=None, index_col=0
+    )[1]
+    table = pd.read_csv(folder / "Gene_table.txt", sep="\t", index_col=0)
+    assert list(annotation.index) == list(table.columns)
+    mapping = pd.read_csv(folder / "cell_id_to_cs_id.csv", header=None, index_col=0)[1]
+    # every cell's cellstate carries that cell's batch
+    assert (
+        annotation.loc[mapping.to_numpy()].to_numpy()
+        == two_populations.obs.loc[mapping.index, "batch"].to_numpy()
+    ).all()
+
+
+def test_export_rejects_cellstates_across_batches(labelled, tmp_path):
+    labelled.obs["batch"] = [
+        "b1",
+        "b1",
+        "b2",
+        "b1",
+        "b1",
+        "b1",
+    ]  # cellstate 2 spans both
+    with pytest.raises(ValueError, match="several batches"):
+        export_cellstates(labelled, tmp_path / "out", batch_key="batch")
+    labelled.obs["batch"] = ["b1", "b2", "b1", "b2", "b2", "b1"]
+    folder = export_cellstates(labelled, tmp_path / "out", batch_key="batch")
+    assert (folder / "batch_annotation.tsv").read_text().split() == [
+        "cs_0", "b2", "cs_1", "b1", "cs_2", "b2",
+    ]  # fmt: skip
+
+
+@needs_executable
+def test_cellstates_n_target(two_populations, tmp_path):
+    cellstates(two_populations, threads=2, key_added="fine")
+    n_fine = two_populations.obs["fine"].nunique()
+    assert n_fine > 2
+    cellstates(two_populations, threads=2, n_target=2, work_dir=tmp_path / "work")
+    labels = two_populations.obs["cellstate"]
+    assert labels.nunique() == 2
+    # merging down to two recovers the two populations
+    assert (
+        two_populations.obs.groupby("cellstate", observed=True)["population"].nunique()
+        == 1
+    ).all()
+    assert two_populations.uns["cellstate"]["params"]["n_target"] == 2
+    # one labels file per intermediate number of cellstates
+    assert (tmp_path / "work" / "coarsify" / "clustering_2_clusters.txt").is_file()
+
+    # a target above the number found leaves the cellstates as they are
+    cellstates(two_populations, threads=2, n_target=10_000, key_added="unchanged")
+    assert list(two_populations.obs["unchanged"]) == list(two_populations.obs["fine"])

@@ -46,6 +46,8 @@ def cellstates(
     *,
     layer: str | None = None,
     key_added: str = "cellstate",
+    batch_key: str | None = None,
+    n_target: int | None = None,
     prior: Sequence[float] | None = None,
     seed: int = 1,
     threads: int | None = None,
@@ -67,6 +69,18 @@ def cellstates(
         ``adata.obs[key_added]`` receives the cellstate label of each cell as a
         categorical ("0", "1", ...). ``adata.uns[key_added]`` receives the
         parameters and the number of cellstates.
+    batch_key
+        ``adata.obs`` column with the batch of each cell. The batches are then
+        clustered separately, so that no cellstate holds cells of two batches;
+        the multi-batch Sanity route needs that. Labels stay unique across
+        batches.
+    n_target
+        Merge the cellstates further until this many are left, with the
+        coarsify_cellstates program. Use it when cellstates alone merges almost
+        nothing, as on deeply sequenced cells. Applies to each batch separately
+        if ``batch_key`` is given. With ``work_dir``, the subfolder ``coarsify``
+        keeps the labels of every intermediate number of cellstates as
+        ``clustering_<k>_clusters.txt``.
     prior
         One prior parameter per gene; None lets cellstates use its default.
     seed
@@ -75,8 +89,9 @@ def cellstates(
     threads
         OpenMP threads; None uses half the logical cores.
     work_dir
-        Folder to keep the input matrix, log and diagnostic files in. By default
-        a temporary folder is used and removed afterwards.
+        Folder to keep the input matrix, log and diagnostic files in, with one
+        subfolder per batch if ``batch_key`` is given. By default a temporary
+        folder is used and removed afterwards.
     executable
         cellstates executable; defaults to the CELLSTATES_BIN environment
         variable, then to the one built by `make cellstates`.
@@ -88,6 +103,14 @@ def cellstates(
     program = Path(executable or os.environ.get("CELLSTATES_BIN") or DEFAULT_EXECUTABLE)
     if not program.is_file():
         raise FileNotFoundError(f"{program} not found; run `make cellstates` first")
+    coarsify_program = program.with_name("coarsify_cellstates")
+    if n_target is not None:
+        if n_target < 1:
+            raise ValueError("n_target must be at least 1")
+        if not coarsify_program.is_file():
+            raise FileNotFoundError(
+                f"{coarsify_program} not found; run `make cellstates` first"
+            )
     counts = _counts(adata, layer)
     empty_cells = int((np.asarray(counts.sum(axis=1)).ravel() == 0).sum())
     if empty_cells:
@@ -95,54 +118,55 @@ def cellstates(
     if threads is None:
         threads = max(1, (os.cpu_count() or 2) // 2)
 
+    prior_values = None
+    if prior is not None:
+        prior_values = np.asarray(prior, dtype=np.float64)
+        if prior_values.shape != (adata.n_vars,):
+            raise ValueError(f"prior needs one value per gene ({adata.n_vars})")
+
+    # cells of each run: all of them, or one run per batch
+    if batch_key is None:
+        runs = [("", np.arange(adata.n_obs))]
+    else:
+        if batch_key not in adata.obs:
+            raise KeyError(f"adata.obs has no column {batch_key!r}")
+        batches = adata.obs[batch_key]
+        if batches.isna().to_numpy().any():
+            raise ValueError(f"adata.obs[{batch_key!r}] has missing values")
+        batch_of_cell = batches.astype(str).to_numpy()
+        runs = [
+            (batch, np.flatnonzero(batch_of_cell == batch))
+            for batch in sorted(set(batch_of_cell))
+        ]
+
+    labels = np.empty(adata.n_obs, dtype=np.int64)
+    n_cellstates = 0
     with tempfile.TemporaryDirectory() as temporary:
-        folder = Path(work_dir) if work_dir is not None else Path(temporary)
-        folder.mkdir(parents=True, exist_ok=True)
-        # cellstates reads genes x cells and labels the columns in order
-        mmwrite(folder / "counts.mtx", counts.T.tocoo(), field="integer")
-        command = [
-            str(program),
-            "--data", str(folder / "counts.mtx"),
-            "--out-dir", str(folder),
-            "--seed", str(seed),
-            "--threads", str(threads),
-        ]  # fmt: skip
-        if prior is None:
-            command += ["--prior", "None"]
-        else:
-            prior_values = np.asarray(prior, dtype=np.float64)
-            if prior_values.shape != (adata.n_vars,):
-                raise ValueError(f"prior needs one value per gene ({adata.n_vars})")
-            np.savetxt(folder / "prior.txt", prior_values)
-            command += ["--prior", str(folder / "prior.txt")]
-        command += list(extra_args)
-
-        log_path = folder / "run.log"
-        with open(log_path, "w") as log:
-            try:
-                finished = subprocess.run(
-                    command, stdout=log, stderr=subprocess.STDOUT, timeout=timeout
-                )
-            except subprocess.TimeoutExpired:
-                raise RuntimeError(
-                    f"cellstates did not finish within {timeout} s"
-                ) from None
-        if finished.returncode != 0:
-            tail = "\n".join(log_path.read_text().splitlines()[-15:])
-            raise RuntimeError(
-                f"cellstates exited with code {finished.returncode}:\n{tail}"
+        root = Path(work_dir) if work_dir is not None else Path(temporary)
+        for batch, cells in runs:
+            batch_labels = _run_cellstates(
+                counts[cells],
+                root / batch,
+                program=program,
+                coarsify_program=coarsify_program,
+                n_target=n_target,
+                seed=seed,
+                threads=threads,
+                prior_values=prior_values,
+                extra_args=extra_args,
+                timeout=timeout,
             )
-        labels = np.loadtxt(folder / "optimized_clusters.txt", dtype=np.int64, ndmin=1)
+            # shift past the labels of the previous batches; a single run keeps its labels
+            labels[cells] = n_cellstates + batch_labels
+            n_cellstates = int(labels[cells].max()) + 1
 
-    if labels.shape != (adata.n_obs,):
-        raise RuntimeError(
-            f"cellstates returned {labels.size} labels for {adata.n_obs} cells"
-        )
     categories = [str(label) for label in np.unique(labels)]
     adata.obs[key_added] = pd.Categorical(labels.astype(str), categories=categories)
     adata.uns[key_added] = {
         "params": {
             "layer": layer,
+            "batch_key": batch_key,
+            "n_target": n_target,
             "seed": seed,
             "threads": threads,
             "extra_args": list(extra_args),
@@ -151,12 +175,88 @@ def cellstates(
     }
 
 
+def _run_cellstates(
+    counts: sp.csr_matrix,
+    folder: Path,
+    *,
+    program: Path,
+    coarsify_program: Path,
+    n_target: int | None,
+    seed: int,
+    threads: int,
+    prior_values: np.ndarray | None,
+    extra_args: Sequence[str],
+    timeout: float | None,
+) -> np.ndarray:
+    """Run the executable on a cells x genes count matrix; returns one label per
+    cell."""
+    folder.mkdir(parents=True, exist_ok=True)
+    # cellstates reads genes x cells and labels the columns in order
+    mmwrite(folder / "counts.mtx", counts.T.tocoo(), field="integer")
+    prior_file = "None"
+    if prior_values is not None:
+        np.savetxt(folder / "prior.txt", prior_values)
+        prior_file = str(folder / "prior.txt")
+    shared = ["--data", str(folder / "counts.mtx"), "--prior", prior_file, "--threads", str(threads)]  # fmt: skip
+    _execute(
+        [str(program), *shared, "--out-dir", str(folder), "--seed", str(seed), *extra_args],
+        folder / "run.log",
+        timeout,
+    )  # fmt: skip
+    labels_file = folder / "optimized_clusters.txt"
+    labels = np.loadtxt(labels_file, dtype=np.int64, ndmin=1)
+
+    if n_target is not None and np.unique(labels).size > n_target:
+        # merge the cellstates one at a time down to n_target; every step writes its labels
+        coarsify_folder = folder / "coarsify"
+        coarsify_folder.mkdir(exist_ok=True)
+        _execute(
+            [
+                str(coarsify_program), *shared,
+                "--clusters", str(labels_file),
+                "--n-target-clusters", str(n_target),
+                "--out-dir", str(coarsify_folder),
+            ],
+            coarsify_folder / "run.log",
+            timeout,
+        )  # fmt: skip
+        labels = np.loadtxt(
+            coarsify_folder / f"clustering_{n_target}_clusters.txt",
+            dtype=np.int64,
+            ndmin=1,
+        )
+
+    n_cells = counts.indptr.size - 1
+    if labels.shape != (n_cells,):
+        raise RuntimeError(
+            f"cellstates returned {labels.size} labels for {n_cells} cells"
+        )
+    return labels
+
+
+def _execute(command: list[str], log_path: Path, timeout: float | None) -> None:
+    """Run a program with its output in log_path; raise with the log's tail if it
+    fails."""
+    name = Path(command[0]).name
+    with open(log_path, "w") as log:
+        try:
+            finished = subprocess.run(
+                command, stdout=log, stderr=subprocess.STDOUT, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"{name} did not finish within {timeout} s") from None
+    if finished.returncode != 0:
+        tail = "\n".join(log_path.read_text().splitlines()[-15:])
+        raise RuntimeError(f"{name} exited with code {finished.returncode}:\n{tail}")
+
+
 def export_cellstates(
     adata: AnnData,
     out_dir,
     *,
     key: str = "cellstate",
     layer: str | None = None,
+    batch_key: str | None = None,
     min_cells: int = 1,
     overwrite: bool = False,
 ) -> Path:
@@ -174,7 +274,11 @@ def export_cellstates(
     - ``cell_id_to_cs_id.csv``: cell id and cellstate id per line, without header,
       for the cells in kept cellstates.
 
-    Cellstate ids in the last two files are ``cs_0``, ``cs_1``, ... over the kept
+    - ``batch_annotation.tsv``, only with ``batch_key``: cellstate id and batch per
+      line, tab-separated without header. scripts/run_sanity_multibatch.py takes
+      it with ``Gene_table.txt``.
+
+    Cellstate ids in these files are ``cs_0``, ``cs_1``, ... over the kept
     cellstates in ascending label order, so they differ from the labels once
     ``min_cells`` drops any.
 
@@ -189,6 +293,9 @@ def export_cellstates(
         written by :func:`cellstates`.
     layer
         Layer holding the raw counts; ``adata.X`` if None.
+    batch_key
+        ``adata.obs`` column with the batch of each cell. Every cellstate must
+        lie within one batch, as :func:`cellstates` with ``batch_key`` ensures.
     min_cells
         Leave cellstates with fewer cells out of ``Gene_table.txt``. The authors'
         default for the C++ Bonsai drops single-cell cellstates (``min_cells=2``).
@@ -227,7 +334,20 @@ def export_cellstates(
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    names = ("optimized_clusters.txt", "Gene_table.txt", "cell_id_to_cs_id.csv")
+    names = ["optimized_clusters.txt", "Gene_table.txt", "cell_id_to_cs_id.csv"]
+    batch_of_group = None
+    if batch_key is not None:
+        if batch_key not in adata.obs:
+            raise KeyError(f"adata.obs has no column {batch_key!r}")
+        batch_of_cell = adata.obs[batch_key].astype(str).to_numpy()
+        # batch of each cellstate, taken from its first cell
+        batch_of_group = batch_of_cell[np.unique(cell_to_group, return_index=True)[1]]
+        if (batch_of_group[cell_to_group] != batch_of_cell).any():
+            raise ValueError(
+                f"some cellstates hold cells of several batches; run cellstates with "
+                f"batch_key={batch_key!r}"
+            )
+        names.append("batch_annotation.tsv")
     present = [name for name in names if (out_dir / name).exists()]
     if present and not overwrite:
         raise FileExistsError(
@@ -249,4 +369,8 @@ def export_cellstates(
         [cs_ids[column] for column in column_of_cell[cells]],
         index=adata.obs_names[cells],
     ).to_csv(out_dir / "cell_id_to_cs_id.csv", header=False)
+    if batch_of_group is not None:
+        pd.Series(batch_of_group[kept], index=cs_ids).to_csv(
+            out_dir / "batch_annotation.tsv", sep="\t", header=False
+        )
     return out_dir

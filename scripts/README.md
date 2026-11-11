@@ -8,7 +8,9 @@ The `.py` scripts are current.
   and the same `--counts`/`--key` options, or a count table with `--batch-annotation FILE`.
 - `run_bonsai.py`: build a tree from either folder with the C++ Bonsai. Build it once with `make bonsai`.
 - `run_cellstates.py`: cluster cells into cellstates; writes `optimized_clusters.txt` and the aggregated
-  `Gene_table.txt`. Build the executable once with `make cellstates`.
+  `Gene_table.txt`. Takes the same input and `--counts`/`--key` options as `run_sanity.py`. With
+  `--batch-key OBS_COLUMN` it clusters each batch separately and writes `batch_annotation.tsv` for
+  `run_sanity_multibatch.py`. Build the executable once with `make cellstates`.
 - `run_bonsai_old_premerged.py`: build a tree with the Python Bonsai, starting from the cellstates of
   `optimized_clusters.txt`; every cell stays a leaf.
 - `check_posterior_pdists.py`: check `bonsai_lib.get_pdists_posterior` on a Bonsai output folder.

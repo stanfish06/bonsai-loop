@@ -10,6 +10,8 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
+        "aarch64-darwin"
+        "x86_64-darwin"
       ];
       forEachSystem = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
@@ -24,6 +26,10 @@
             pkgs.eigen
             pkgs.zlib
           ];
+          # The macOS shell defaults to clang, which has no OpenMP here; build with the gcc above.
+          shellHook = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+            export CC=gcc CXX=g++
+          '';
         };
       });
     };

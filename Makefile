@@ -14,10 +14,12 @@ bonsai:
 CELLSTATES_DIR ?= third_party/supercellstates
 CELLSTATES_BUILD_DIR ?= build/cellstates
 
-# Build the cellstates executable at $(CELLSTATES_BUILD_DIR)/cellstates
+# Build the cellstates executable and coarsify_cellstates, which merges cellstates down to a
+# target number, in $(CELLSTATES_BUILD_DIR)
 cellstates:
 	mkdir -p $(CELLSTATES_BUILD_DIR)
 	$(CXX) -std=c++20 -O3 -ffast-math -fopenmp $(CELLSTATES_DIR)/cluster.cpp -o $(CELLSTATES_BUILD_DIR)/cellstates -lz
+	$(CXX) -std=c++20 -O3 -ffast-math -fopenmp $(CELLSTATES_DIR)/coarsify_cellstates.cpp -o $(CELLSTATES_BUILD_DIR)/coarsify_cellstates -lz
 
 format-project:
 	uvx pyproject-fmt pyproject.toml || true
