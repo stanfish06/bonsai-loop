@@ -26,6 +26,7 @@ out = BonsaiOutput("path/to/final_bonsai_zscore0.75")  # Python or C++ Bonsai ou
 tree = out.tree_distances(leaves_only=True)  # sum of branch lengths
 post = out.posterior_distances(leaves_only=True, with_uncertainty=True)
 residual = post.values - tree.values  # negative: closer than the tree allows
+one = out.posterior_distance("cell_a", "cell_b")  # one pair, as a float
 top = out.detect_convergence(leaves_only=True, top_k=50, max_pairs=20_000_000)
 ```
 

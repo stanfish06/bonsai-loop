@@ -10,9 +10,10 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import shortest_path
-from scipy.spatial.distance import pdist, squareform
+from scipy.spatial.distance import squareform
 from tqdm import tqdm
 
+from .bonsai_lib import _load_bonsai_output, get_pdists_posterior
 from .bonsai_lib.bonsai.bonsai_treeHelpers import Tree, TreeNode  # type: ignore[import]
 
 
@@ -536,6 +537,7 @@ def get_pdists_on_tree_by_level(
     node_data_lookup: dict[str, TreeNodeExtraData],
     dist_type: Literal["bonsai_t", "euclidean"] = "bonsai_t",
     level: int = 0,
+    bonsai_output_folder=None,
 ) -> tuple[np.ndarray, list[str]]:
     """
     Compute pairwise distances on the Bonsai tree for nodes at one topological level.
@@ -549,9 +551,14 @@ def get_pdists_on_tree_by_level(
     dist_type : {"bonsai_t", "euclidean"}
         The edge weight used for shortest-path distances:
             - "bonsai_t": use Bonsai tParent edge lengths
-            - "euclidean": use squared Euclidean distances between posterior node coordinates
+            - "euclidean": use the posterior distance between the two nodes of each edge,
+              squared Euclidean distance between posterior node coordinates plus the
+              posterior variance of their difference (see bonsai_lib.get_pdists_posterior)
     level : int
         The topological level from leaves used to select nodes.
+    bonsai_output_folder
+        Final Bonsai output folder (Python or C++ Bonsai), read by pybonsai.
+        Required for dist_type "euclidean".
 
     Returns
     -------
@@ -575,11 +582,14 @@ def get_pdists_on_tree_by_level(
     if dist_type == "bonsai_t":
         weights = edge_df["dist"].to_numpy(dtype=float)
     elif dist_type == "euclidean":
+        if bonsai_output_folder is None:
+            raise ValueError(
+                "bonsai_output_folder is required for euclidean tree distances."
+            )
+        output = _load_bonsai_output(bonsai_output_folder)
         weights_list = []
         for src, tgt in zip(edge_sources, edge_targets):
-            src_ltqs = node_data_lookup[src].tree_node.ltqsAIRoot
-            tgt_ltqs = node_data_lookup[tgt].tree_node.ltqsAIRoot
-            weights_list.append(np.mean((src_ltqs - tgt_ltqs) ** 2))
+            weights_list.append(output.posterior_distance(src, tgt))
         weights = np.array(weights_list, dtype=float)
 
     cols_complete = np.concatenate((cols, rows))
@@ -607,18 +617,22 @@ def get_pdists_on_tree_by_level(
 
 def get_pdists_embedding_by_level(
     node_data_lookup: dict[str, TreeNodeExtraData],
+    bonsai_output_folder,
     level: int = 0,
 ) -> tuple[np.ndarray, list[str]]:
     """
     Compute straight-line pairwise distances for nodes at one topological level.
 
-    Distances are squared Euclidean distances between posterior node coordinates,
-    normalized by the number of dimensions.
+    Distances are posterior distances: squared Euclidean distances between posterior
+    node coordinates, normalized by the number of dimensions, plus the posterior
+    variance of their difference (see bonsai_lib.get_pdists_posterior).
 
     Parameters
     ----------
     node_data_lookup : dict[str, TreeNodeExtraData]
         A map from TreeNode.nodeId to TreeNodeExtraData with valid topological_level.
+    bonsai_output_folder
+        Final Bonsai output folder (Python or C++ Bonsai), read by pybonsai.
     level : int
         The topological level from leaves used to select nodes.
 
@@ -634,10 +648,7 @@ def get_pdists_embedding_by_level(
         for node_id, node_data in node_data_lookup.items()
         if level == -1 or node_data.topological_level == level
     ]
-    coords = np.array(
-        [node_data_lookup[node_id].tree_node.ltqsAIRoot for node_id in node_ids]
-    )
-    dists = pdist(coords, metric="sqeuclidean") / coords.shape[1]
+    dists = get_pdists_posterior(bonsai_output_folder, node_ids)
     return dists, node_ids
 
 

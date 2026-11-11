@@ -40,6 +40,7 @@ cdef extern from "_shim.hpp" namespace "pybonsai" nogil:
         double branch_length(int node) except +
         void tree_distances(const vector[int]& nodes, int threads, double* out) except +
         void posterior_distances(const vector[int]& nodes, int threads, double* out, double* out_sd) except +
+        double posterior_distance(int first_node, int second_node, double* out_sd) except +
         void posterior_belief(int node, double* out_mean, double* out_variance) except +
         Candidates detect_convergence(const vector[int]& nodes, size_t top_k, size_t max_pairs,
                                       cbool allow_huge, int threads) except +
@@ -183,6 +184,27 @@ cdef class BonsaiOutput:
         with nogil:
             self._out.posterior_distances(selected, threads, &out[0], sd_ptr)
         return PairDistances(np.asarray(out), [self.node_ids[row] for row in rows], uncertainty)
+
+    def posterior_distance(self, first_node_id, second_node_id, bint with_uncertainty=False):
+        """Posterior mean of the true mean squared distance between two nodes.
+
+        The same estimate as one entry of `posterior_distances`.
+
+        Args:
+            first_node_id: Node id of one node.
+            second_node_id: Node id of the other node.
+            with_uncertainty: Also return the estimate's standard deviation.
+
+        Returns:
+            The distance as a float, or (distance, standard_deviation) if requested.
+        """
+        cdef int first_node = self.node_index[self._row_of_id[first_node_id]]
+        cdef int second_node = self.node_index[self._row_of_id[second_node_id]]
+        cdef double standard_deviation = 0.0
+        cdef double distance = self._out.posterior_distance(first_node, second_node, &standard_deviation)
+        if with_uncertainty:
+            return distance, standard_deviation
+        return distance
 
     def posterior_belief(self, node_id):
         """Posterior mean and variance per feature of one node, in the diffusion basis.

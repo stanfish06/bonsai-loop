@@ -137,6 +137,19 @@ void Output::posterior_distances(const std::vector<int>& nodes, int threads, dou
     }
 }
 
+double Output::posterior_distance(int first_node, int second_node, double* out_sd) const {
+    impl_->node(first_node);
+    impl_->node(second_node);
+    const penjing::PosteriorCovariance& covariance = impl_->covariance();
+    std::vector<double> scratch(covariance.n_features());
+    const penjing::PosteriorDistance estimate =
+        penjing::posterior_squared_distance(covariance, first_node, second_node, scratch);
+    if (out_sd != nullptr) {
+        *out_sd = estimate.standard_deviation;
+    }
+    return estimate.distance;
+}
+
 void Output::posterior_belief(int node, double* out_mean, double* out_variance) const {
     impl_->node(node);
     const penjing::PosteriorCovariance& covariance = impl_->covariance();

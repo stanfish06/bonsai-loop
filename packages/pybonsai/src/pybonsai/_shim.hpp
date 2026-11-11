@@ -56,6 +56,10 @@ public:
     /// `out_sd` may be null; otherwise it receives each estimate's standard deviation.
     void posterior_distances(const std::vector<int>& nodes, int threads, double* out, double* out_sd) const;
 
+    /// The same estimate for one pair of nodes, given in either order.
+    /// `out_sd` may be null; otherwise it receives the estimate's standard deviation.
+    double posterior_distance(int first_node, int second_node, double* out_sd) const;
+
     /// Posterior mean and variance per feature for one node, in the diffusion basis.
     /// Each buffer holds n_features doubles.
     void posterior_belief(int node, double* out_mean, double* out_variance) const;

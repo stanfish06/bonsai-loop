@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Union
 
 import numpy as np
-from scipy.spatial.distance import squareform
+from scipy.spatial.distance import pdist, squareform
 
 _BONSAI = (
     Path(__file__).resolve().parents[2] / "third_party" / "Bonsai-data-representation"
@@ -36,8 +36,10 @@ sys.modules[
 # import relevant functions for distance computation
 # pretend to be submodules of bonsai_lib
 from .bonsai_lib.bonsai.bonsai_dataprocessing import (  # type: ignore[import]
-    get_bonsai_euclidean_distances,
-    get_bonsai_posteriors,
+    get_bonsai_euclidean_distances as _bonsai_euclidean_distances,
+)
+from .bonsai_lib.bonsai.bonsai_dataprocessing import (  # type: ignore[import]
+    get_bonsai_posteriors as _bonsai_posteriors,
 )
 from .bonsai_lib.bonsai_scout.my_tree_layout import Layout_Tree  # type: ignore[import]
 from .bonsai_lib.downstream_analyses import (  # type: ignore[import]
@@ -90,34 +92,24 @@ def _edge_weight_t(_parent: Any, child: Any) -> float:
     return float(child.tParent or 0.0)
 
 
-def _edge_weight_euclidean_ltqs(parent: Any, child: Any) -> float:
-    parent_ltqs = parent.ltqsAIRoot
-    child_ltqs = child.ltqsAIRoot
-    if parent_ltqs is None or child_ltqs is None:
-        raise ValueError(
-            "euclidean tree distances require ltqsAIRoot on nodes; "
-            "load the tree with posterior ltqs or pass bonsai_output_folder."
-        )
-    return float(np.mean((parent_ltqs - child_ltqs) ** 2))
+def _load_bonsai_output(bonsai_output_folder):
+    try:
+        from pybonsai import BonsaiOutput
+    except ImportError as error:
+        raise ImportError(
+            "posterior distances need the pybonsai C++ extension "
+            "(packages/pybonsai), which is not built in this environment."
+        ) from error
+    return BonsaiOutput(bonsai_output_folder)
 
 
-def _load_ltqs_by_node_id(
+def _edge_weight_euclidean_posterior(
     bonsai_output_folder,
-    node_ids: list[str],
-) -> dict[str, np.ndarray]:
-    ltqs_by_gene_cell, _ = get_bonsai_posteriors(
-        bonsai_output_folder, vert_ids=list(node_ids)
-    )
-    return {node_id: ltqs_by_gene_cell[:, i] for i, node_id in enumerate(node_ids)}
-
-
-def _edge_weight_euclidean_lookup(
-    ltqs_by_node_id: dict[str, np.ndarray],
 ) -> Callable[[Any, Any], float]:
+    output = _load_bonsai_output(bonsai_output_folder)
+
     def _weight(parent: Any, child: Any) -> float:
-        parent_ltqs = ltqs_by_node_id[parent.nodeId]
-        child_ltqs = ltqs_by_node_id[child.nodeId]
-        return float(np.mean((parent_ltqs - child_ltqs) ** 2))
+        return output.posterior_distance(parent.nodeId, child.nodeId)
 
     return _weight
 
@@ -163,10 +155,6 @@ def _build_lca_tables(
     return depth, up, max_log
 
 
-def _tree_has_ltqs(nodes: list[Any]) -> bool:
-    return any(getattr(node, "ltqsAIRoot", None) is not None for node in nodes)
-
-
 def _lca(
     left_idx: int,
     right_idx: int,
@@ -202,12 +190,7 @@ def _patristic_pdist(
     *,
     bonsai_output_folder=None,
 ) -> np.ndarray:
-    """
-    Pairwise tree-path distances using dist-to-root and LCA (O(n^2) queries).
-
-    Much faster than repeated scipy shortest-path calls when many cell_ids are
-    requested, because tree distance is patristic rather than general-graph.
-    """
+    """Pairwise tree-path distances using dist-to-root and LCA (O(n^2) queries)."""
     nodes, node_id_to_idx, parent_indices = _index_tree_nodes(root)
     missing = [node_id for node_id in cell_ids if node_id not in node_id_to_idx]
     if missing:
@@ -217,18 +200,11 @@ def _patristic_pdist(
     if weight_kind == "t":
         edge_weight = _edge_weight_t
     elif weight_kind == "euclidean":
-        if _tree_has_ltqs(nodes):
-            edge_weight = _edge_weight_euclidean_ltqs
-        else:
-            if bonsai_output_folder is None:
-                raise ValueError(
-                    "bonsai_output_folder is required for euclidean tree distances "
-                    "when ltqsAIRoot is not loaded on tree nodes."
-                )
-            ltqs_lookup = _load_ltqs_by_node_id(
-                bonsai_output_folder, [node.nodeId for node in nodes]
+        if bonsai_output_folder is None:
+            raise ValueError(
+                "bonsai_output_folder is required for euclidean tree distances."
             )
-            edge_weight = _edge_weight_euclidean_lookup(ltqs_lookup)
+        edge_weight = _edge_weight_euclidean_posterior(bonsai_output_folder)
     else:
         raise ValueError(f"unsupported weight_kind: {weight_kind!r}")
 
@@ -254,6 +230,72 @@ def _patristic_pdist(
             write_idx += 1
 
     return condensed
+
+
+def get_bonsai_posteriors(
+    final_bonsai_folder,
+    vert_ids,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Posterior ltqs and their variances for vert_ids.
+
+    Parameters
+    ----------
+    final_bonsai_folder
+        Final Bonsai output folder. Python Bonsai output is read by Bonsai's own
+        ``get_bonsai_posteriors``. C++ Bonsai output is read from
+        posterior_coords.npy, posterior_coords_variances.npy and vertex_list.tsv.
+    vert_ids
+        Node ids to include.
+
+    Returns
+    -------
+    ``(ltqs, ltqs_vars)``, both genes x vert_ids.
+    """
+    folder = Path(final_bonsai_folder)
+    if not (folder / "posterior_coords.npy").exists():
+        return _bonsai_posteriors(final_bonsai_folder, vert_ids=vert_ids)
+
+    node_id_to_vert_ind = {}
+    with open(folder / "vertex_list.tsv", "r") as f:
+        next(f)
+        for line in f:
+            parts = line.strip().split("\t")
+            node_id_to_vert_ind[parts[1]] = int(parts[0])
+    missing = [vert_id for vert_id in vert_ids if vert_id not in node_id_to_vert_ind]
+    if missing:
+        raise KeyError(
+            f"vert_ids not found in Bonsai output (first missing: {missing[0]!r})"
+        )
+    vert_inds = [node_id_to_vert_ind[vert_id] for vert_id in vert_ids]
+    ltqs_vert_gene = np.load(folder / "posterior_coords.npy")
+    ltqs_vars_vert_gene = np.load(folder / "posterior_coords_variances.npy")
+    return ltqs_vert_gene[vert_inds].T, ltqs_vars_vert_gene[vert_inds].T
+
+
+def get_bonsai_euclidean_distances(
+    final_bonsai_folder,
+    cell_ids,
+) -> np.ndarray:
+    """
+    Pairwise squared-Euclidean distances between posterior ltqs of cell_ids, divided by
+    the number of genes. (Old function; does not match bonsai t; use
+    get_pdists_posterior instead)
+
+    Parameters
+    ----------
+    final_bonsai_folder
+        Final Bonsai output folder (Python or C++ Bonsai).
+    cell_ids
+        Node ids to include in the distance matrix.
+    """
+    if not (Path(final_bonsai_folder) / "posterior_coords.npy").exists():
+        return _bonsai_euclidean_distances(final_bonsai_folder, cell_ids)
+    ltqs_by_gene_cell, _ = get_bonsai_posteriors(
+        final_bonsai_folder, vert_ids=list(cell_ids)
+    )
+    num_dims = ltqs_by_gene_cell.shape[0]
+    return pdist(ltqs_by_gene_cell.T, metric="sqeuclidean") / num_dims
 
 
 def get_pdists_on_tree(
@@ -291,21 +333,24 @@ def get_pdists_on_tree_euclidean(
     """
     Pairwise tree-path distances with squared-Euclidean edge weights.
 
-    Edge weights match the parent-child term used elsewhere in bonsai-loop:
-    mean((ltqs_parent - ltqs_child)^2). Only tree edges are evaluated (not an
-    all-node pdist matrix).
+    Each edge weighs the posterior distance between parent and child, the same
+    per-pair quantity as ``get_pdists_posterior``:
+    mean((ltqs_parent - ltqs_child)^2) plus the posterior variance of that
+    difference. Only tree edges are evaluated (not an all-node pdist matrix).
+    On a fitted tree each edge weight equals its branch length up to the fit
+    tolerance, so the result stays close to ``get_pdists_on_tree``.
 
     Parameters
     ----------
     nwk_file
         Path to tree.nwk (used when ``tree`` is not provided).
     bonsai_output_folder
-        Bonsai output folder with posterior_ltqs_vertByGene.npy (used when
-        ltqsAIRoot is not on tree nodes).
+        Final Bonsai output folder (Python or C++ Bonsai), read by pybonsai.
     cell_ids
         Node ids to include in the distance matrix.
     tree
-        Optional pre-loaded Bonsai ``Tree`` with posterior ltqs on nodes.
+        Optional pre-loaded Bonsai ``Tree`` or ``Layout_Tree``. When provided,
+        the Newick file is not re-parsed.
     """
     root = (
         _tree_root(tree) if tree is not None else _layout_tree_from_nwk(nwk_file).root
@@ -356,16 +401,8 @@ def get_pdists_posterior(
     Condensed distances in ``cell_ids`` order, or ``(distances, std)`` when
     ``with_uncertainty`` is set.
     """
-    try:
-        from pybonsai import BonsaiOutput
-    except ImportError as error:
-        raise ImportError(
-            "get_pdists_posterior needs the pybonsai C++ extension "
-            "(packages/pybonsai), which is not built in this environment."
-        ) from error
-
     cell_ids = list(cell_ids)
-    result = BonsaiOutput(bonsai_output_folder).posterior_distances(
+    result = _load_bonsai_output(bonsai_output_folder).posterior_distances(
         nodes=cell_ids, threads=threads, with_uncertainty=with_uncertainty
     )
     # pybonsai reports nodes in its own order; put pairs back in cell_ids order

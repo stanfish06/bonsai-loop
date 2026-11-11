@@ -89,6 +89,27 @@ def test_posterior_distance_within_covariance_bounds(output):
             assert distances[a, b] > gap
 
 
+def test_posterior_distance_of_one_pair_is_an_entry_of_all_pairs(output):
+    result = output.posterior_distances(with_uncertainty=True)
+    distances = squareform(result.values)
+    spread = squareform(result.uncertainty)
+    for a, b in [(0, 1), (17, 90), (5, output.n_nodes - 1)]:
+        first, second = output.node_ids[a], output.node_ids[b]
+        distance, standard_deviation = output.posterior_distance(
+            first, second, with_uncertainty=True
+        )
+        assert distance == distances[a, b]
+        assert standard_deviation == spread[a, b]
+        # the order of the two nodes does not matter
+        np.testing.assert_allclose(
+            output.posterior_distance(second, first), distance, rtol=1e-8
+        )
+
+    # a node is at distance zero from itself
+    node_id = output.node_ids[3]
+    assert output.posterior_distance(node_id, node_id, with_uncertainty=True) == (0, 0)
+
+
 def test_thread_count_does_not_change_results(output):
     one = output.posterior_distances(threads=1, with_uncertainty=True)
     many = output.posterior_distances(threads=4, with_uncertainty=True)
@@ -146,6 +167,8 @@ def test_topology_only_has_trees_but_no_posteriors(tree_folder, output):
     with pytest.raises(RuntimeError, match="topology_only"):
         bare.posterior_distances()
     with pytest.raises(RuntimeError, match="topology_only"):
+        bare.posterior_distance(bare.node_ids[0], bare.node_ids[1])
+    with pytest.raises(RuntimeError, match="topology_only"):
         bare.detect_convergence()
 
 
@@ -154,6 +177,8 @@ def test_errors(output, tmp_path):
         BonsaiOutput(tmp_path)  # not a Bonsai output folder
     with pytest.raises(KeyError, match="no_such_node"):
         output.tree_distances(nodes=[output.node_ids[0], "no_such_node"])
+    with pytest.raises(KeyError, match="no_such_node"):
+        output.posterior_distance(output.node_ids[0], "no_such_node")
     with pytest.raises(ValueError, match="at least two"):
         output.tree_distances(nodes=[output.node_ids[0]])
     with pytest.raises(ValueError, match="not both"):

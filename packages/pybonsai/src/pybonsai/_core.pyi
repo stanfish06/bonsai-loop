@@ -49,6 +49,12 @@ class BonsaiOutput:
         threads: int = 0,
         with_uncertainty: bool = False,
     ) -> PairDistances: ...
+    def posterior_distance(
+        self,
+        first_node_id: str,
+        second_node_id: str,
+        with_uncertainty: bool = False,
+    ) -> float | tuple[float, float]: ...
     def posterior_belief(
         self, node_id: str
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: ...
