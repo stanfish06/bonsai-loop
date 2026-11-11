@@ -1438,3 +1438,116 @@ def accumulate_delta_deviation_scores_along_lineage(
             accumulated_score += row[reference_node_id]
             current = child
     return accumulated_score, current.nodeId
+
+
+@dataclass
+class ConvergingSubtree:
+    """
+    Result of find_converging_subtree.
+
+    Attributes
+    ----------
+    root_id : str
+        Node id of the subtree root.
+    node_ids : set[str]
+        Subtree root and all its descendants (internal nodes and leaves).
+    average_score : float
+        Mean score over node_ids.
+    n_candidates : int
+        Number of nodes whose subtree sum is above 0 (in the search region).
+    """
+
+    root_id: str
+    node_ids: set[str]
+    average_score: float
+    n_candidates: int
+
+
+def find_converging_subtree(
+    node_data_lookup: Mapping[str, TreeNodeExtraData],
+    scores: Mapping[str, float],
+    threshold: float,
+    within_node_id: str | None = None,
+) -> ConvergingSubtree:
+    """
+    Largest subtree (a node with all its descendants) whose mean score is above
+    threshold.
+
+    Subtract threshold from the score of every node, sum the result over each subtree
+    in one post-order pass, and return the subtree with the most nodes among those with a
+    sum above 0. A sum above 0 is the same as a mean score above threshold. Ties in size
+    go to the first node in top-down order, i.e. the one closest to the root.
+
+    Below the mean score over all nodes the whole tree qualifies and its root is returned.
+
+    Parameters
+    ----------
+    node_data_lookup : Mapping[str, TreeNodeExtraData]
+        Map from node id to TreeNodeExtraData; only tree_node (nodeId, childNodes,
+        parentNode) is read.
+    scores : Mapping[str, float]
+        Score of every node, e.g. the deviation score towards a reference. Must cover
+        every node of the tree (or of the clade below within_node_id).
+    threshold : float
+        Mean score a subtree must exceed.
+    within_node_id : str | None
+        If given, search only the clade below this node (itself included), e.g. a
+        clade found at a lower threshold.
+
+    Returns
+    -------
+    ConvergingSubtree
+    """
+    if within_node_id is None:
+        start = next(
+            nd.tree_node
+            for nd in node_data_lookup.values()
+            if nd.tree_node.parentNode is None
+        )
+    else:
+        start = node_data_lookup[within_node_id].tree_node
+
+    # nodes from the search root down, so the reversed list has every child before its parent
+    nodes_top_down: list[TreeNode] = []
+    stack = [start]
+    while stack:
+        node = stack.pop()
+        nodes_top_down.append(node)
+        stack.extend(node.childNodes)
+
+    # number of nodes and summed (score - threshold) of the subtree below every node
+    subtree_size: dict[str, int] = {}
+    subtree_sum: dict[str, float] = {}
+    for node in reversed(nodes_top_down):
+        subtree_size[node.nodeId] = 1 + sum(
+            subtree_size[child.nodeId] for child in node.childNodes
+        )
+        subtree_sum[node.nodeId] = (
+            float(scores[node.nodeId])
+            - threshold
+            + sum(subtree_sum[child.nodeId] for child in node.childNodes)
+        )
+
+    candidates = [
+        node.nodeId for node in nodes_top_down if subtree_sum[node.nodeId] > 0
+    ]
+    if not candidates:
+        raise ValueError(
+            f"no subtree has a mean score above {threshold}"
+            + (f" below {within_node_id}" if within_node_id is not None else "")
+        )
+    root_id = max(candidates, key=lambda nid: subtree_size[nid])
+
+    node_ids: set[str] = set()
+    stack = [node_data_lookup[root_id].tree_node]
+    while stack:
+        node = stack.pop()
+        node_ids.add(node.nodeId)
+        stack.extend(node.childNodes)
+
+    return ConvergingSubtree(
+        root_id=root_id,
+        node_ids=node_ids,
+        average_score=subtree_sum[root_id] / subtree_size[root_id] + threshold,
+        n_candidates=len(candidates),
+    )
