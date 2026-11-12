@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
@@ -890,11 +890,58 @@ def select_nodes(
     return keep
 
 
+def _irrelevant_reference_mask(
+    node_data_lookup: Mapping[str, TreeNodeExtraData],
+    branch_ids: list[str],
+    ref_ids: list[str],
+) -> np.ndarray:
+    """
+    Branch-reference pairs whose ΔD does not measure convergence (see
+    compute_delta_deviation_from_parent). For a branch y→z and a reference x:
+        - x is z or a descendant of z: the branch lies on the tree path from the root to
+          x, and ΔD = D_{xz} - D_{xy} + 2 d(y, z), positive without any convergence
+        - x is y or an ancestor of y
+
+    Parameters
+    ----------
+    node_data_lookup : Mapping[str, TreeNodeExtraData]
+        Map from node id to TreeNodeExtraData.
+    branch_ids : list[str]
+        Child node id z of every branch, one row each.
+    ref_ids : list[str]
+        Reference node ids, one column each.
+
+    Returns
+    -------
+    mask : np.ndarray
+        Boolean array (branches x references), True where the pair is irrelevant.
+    """
+    row_of = {nid: i for i, nid in enumerate(branch_ids)}
+    mask = np.zeros((len(branch_ids), len(ref_ids)), dtype=bool)
+    for j, ref_id in enumerate(ref_ids):
+        ref_node = node_data_lookup[ref_id].tree_node
+        # x is z or below z: the branches from x up to the root
+        node = ref_node
+        while node.parentNode is not None:
+            if node.nodeId in row_of:
+                mask[row_of[node.nodeId], j] = True
+            node = node.parentNode
+        # x is y or above y: the branches below x
+        stack = list(ref_node.childNodes)
+        while stack:
+            node = stack.pop()
+            if node.nodeId in row_of:
+                mask[row_of[node.nodeId], j] = True
+            stack.extend(node.childNodes)
+    return mask
+
+
 def compute_delta_deviation_from_parent(
     node_data_lookup: dict[str, TreeNodeExtraData],
     reference_node_ids: list[str] | None = None,
     normalize_by_branch_length: bool = True,
     bonsai_output_folder=None,
+    mask_irelevent_reference_nodes: bool = False,
 ) -> None:
     """
     Compute delta deviation scores ΔD for every parent→child branch against every
@@ -944,6 +991,11 @@ def compute_delta_deviation_from_parent(
         If True, divide row i by tParent of branch i.
     bonsai_output_folder
         Final Bonsai output folder (Python or C++ Bonsai), read by pybonsai. Required.
+    mask_irelevent_reference_nodes : bool
+        If True, ΔD of the irrelevant branch-reference pairs listed above (x = z, x = y,
+        x a descendant of z or an ancestor of y) is stored as nan.
+        smoothen_delta_deviation and aggregate_delta_deviation_from_parent skip nan;
+        accumulate_delta_deviation_scores_along_lineage does not.
     """
     if bonsai_output_folder is None:
         raise ValueError("bonsai_output_folder is required for delta deviation scores.")
@@ -987,6 +1039,13 @@ def compute_delta_deviation_from_parent(
     y_rows = [node_index[y.nodeId] for _, _, y in branch_nodes]
 
     delta_d = branch_d[:, None] - ref_d[z_rows] + ref_d[y_rows]
+
+    if mask_irelevent_reference_nodes:
+        delta_d[
+            _irrelevant_reference_mask(
+                node_data_lookup, [nid for nid, _, _ in branch_nodes], ref_ids
+            )
+        ] = np.nan
 
     if normalize_by_branch_length:
         print("normalize delta deviation by branch length")
@@ -1189,7 +1248,8 @@ def aggregate_delta_deviation_from_parent(
             - x = z (the child) → ΔD = 2‖z - y‖^2 (positive artifact)
             - x = y (the parent) → ΔD = 0 (zero artifact)
             - x descendant of z or ancestor of y (potential cycle artifacts)
-        Not implemented yet.
+        Smoothed ΔD already carries these artifacts from neighboring branches unless
+        compute_delta_deviation_from_parent was run with the same option.
     smoothed: bool
         If True, agglomerate using smoothed ΔD scores
 
@@ -1207,11 +1267,6 @@ def aggregate_delta_deviation_from_parent(
         smoothed = False
         print("No smoothed values found. Using unsmoothed values")
 
-    if mask_irelevent_reference_nodes:
-        raise NotImplementedError(
-            "no impl for subroutine mask irelevent reference nodes"
-        )
-
     branches: list[tuple[str, TreeNodeExtraData]] = [
         (nid, nd)
         for nid, nd in node_data_lookup.items()
@@ -1219,6 +1274,17 @@ def aggregate_delta_deviation_from_parent(
     ]
     if not branches:
         return {}
+
+    # branches x references, True where the reference is irrelevant for the branch
+    irrelevant: np.ndarray | None = None
+    if mask_irelevent_reference_nodes:
+        irrelevant = _irrelevant_reference_mask(
+            node_data_lookup,
+            [nid for nid, _ in branches],
+            list(cast(_DeltaDeviationRow, branches[0][1].delta_deviation_from_parent))
+            if target_node_ids is None
+            else list(target_node_ids),
+        )
 
     def _get_delta_deviation_matrix() -> np.ndarray:
 
@@ -1246,7 +1312,7 @@ def aggregate_delta_deviation_from_parent(
         )
 
     aggregated_scores = {}
-    for nid, nd in branches:
+    for i, (nid, nd) in enumerate(branches):
         delta_deviation_row = cast(
             _DeltaDeviationRow,
             nd.delta_deviation_from_parent_smooth
@@ -1264,6 +1330,8 @@ def aggregate_delta_deviation_from_parent(
                 dtype=float,
             )
         )
+        if irrelevant is not None:
+            values = values[~irrelevant[i]]
         if method.startswith("abs"):
             values = np.abs(values)
         # nan values are skipped
@@ -1438,6 +1506,115 @@ def accumulate_delta_deviation_scores_along_lineage(
             accumulated_score += row[reference_node_id]
             current = child
     return accumulated_score, current.nodeId
+
+
+def sample_reference_nodes(
+    candidate_node_ids: Iterable[str],
+    n_references: int,
+    seed: int,
+) -> list[str]:
+    """
+    Randomly pick reference nodes from a cell group, e.g. the DE leaves of one Bonsai
+    cluster.
+
+    Candidates are sorted before sampling, so the result depends only on the group,
+    n_references and seed, not on the order the group is passed in.
+
+    Parameters
+    ----------
+    candidate_node_ids : Iterable[str]
+        Node ids of the cell group to pick from.
+    n_references : int
+        Number of references to pick, without replacement.
+    seed : int
+        Seed of the random generator.
+
+    Returns
+    -------
+    reference_node_ids : list[str]
+        Picked node ids, sorted.
+    """
+    candidates = sorted(set(candidate_node_ids))
+    if n_references > len(candidates):
+        raise ValueError(
+            f"cannot pick {n_references} references from {len(candidates)} candidates"
+        )
+    picked = np.random.default_rng(seed).choice(
+        len(candidates), size=n_references, replace=False
+    )
+    return [candidates[i] for i in sorted(picked)]
+
+
+def compute_mean_deviation_to_references(
+    node_data_lookup: dict[str, TreeNodeExtraData],
+    reference_node_ids: list[str],
+    bonsai_output_folder,
+) -> dict[str, float]:
+    """
+    Deviation score D of every node (internal nodes included), averaged over reference
+    nodes.
+
+    For a reference x and a node v (definitions as in compute_delta_deviation_from_parent):
+        D(x, v) = tree_d(x, v) - d(x, v)
+    D is computed for every reference and the mean over the references is taken per
+    node. With a single reference the result is the deviation score towards that
+    reference.
+
+    The stored ΔD is not used: on the branches between the root and a reference it is
+    not D_{xz} - D_{xy} (see compute_delta_deviation_from_parent), so it cannot be
+    accumulated to D there.
+
+    The matching score per branch is
+    aggregate_delta_deviation_from_parent(method="mean", target_node_ids=reference_node_ids,
+    mask_irelevent_reference_nodes=True).
+
+    Parameters
+    ----------
+    node_data_lookup : dict[str, TreeNodeExtraData]
+        Map from node id to TreeNodeExtraData. Each tree_node must expose
+        nodeId, parentNode, childNodes.
+    reference_node_ids : list[str]
+        Reference nodes to average over, e.g. from sample_reference_nodes.
+    bonsai_output_folder
+        Final Bonsai output folder (Python or C++ Bonsai), read by pybonsai.
+
+    Returns
+    -------
+    mean_deviation : dict[str, float]
+        A map from node id to the mean of D(x, node) over the references x, for every
+        node of the tree.
+    """
+    if not reference_node_ids:
+        raise ValueError("reference_node_ids is empty")
+    output = _load_bonsai_output(bonsai_output_folder)
+    # d(y, z) of every branch, keyed by the child node z
+    branch_d = {
+        nid: float(output.posterior_distance(nd.tree_node.parentNode.nodeId, nid))
+        for nid, nd in node_data_lookup.items()
+        if nd.tree_node.parentNode is not None
+    }
+
+    deviation_sum = dict.fromkeys(node_data_lookup, 0.0)
+    for ref_id in reference_node_ids:
+        # tree_d(x, node): walk the tree outwards from the reference
+        tree_d = {ref_id: 0.0}
+        stack = [node_data_lookup[ref_id].tree_node]
+        while stack:
+            node = stack.pop()
+            neighbors = [(child, branch_d[child.nodeId]) for child in node.childNodes]
+            if node.parentNode is not None:
+                neighbors.append((node.parentNode, branch_d[node.nodeId]))
+            for neighbor, d in neighbors:
+                if neighbor.nodeId not in tree_d:
+                    tree_d[neighbor.nodeId] = tree_d[node.nodeId] + d
+                    stack.append(neighbor)
+        for nid in node_data_lookup:
+            deviation_sum[nid] += tree_d[nid] - float(
+                output.posterior_distance(ref_id, nid)
+            )
+
+    n_references = len(reference_node_ids)
+    return {nid: total / n_references for nid, total in deviation_sum.items()}
 
 
 @dataclass

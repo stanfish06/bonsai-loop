@@ -17,6 +17,7 @@ from bonsai_loop.convergence import (
     accumulate_delta_deviation_scores_along_lineage,
     compute_delta_deviation_from_parent,
     compute_tree_node_level_and_label,
+    find_converging_subtree,
     get_pdists_embedding_by_level,
     get_pdists_on_tree_by_level,
 )
@@ -190,3 +191,46 @@ def test_accumulated_delta_deviation_recovers_the_deviation(rerooted_tree_and_lo
         accumulate_delta_deviation_scores_along_lineage(
             node_data_lookup, leaf, reference, n_steps=n_steps + 1, direction="up"
         )
+
+
+def test_find_converging_subtree_on_a_toy_tree():
+    """root -> (A, C); A -> (a1, a2); C -> (c1, D); D -> (d1, d2)."""
+    edges = {"root": ["A", "C"], "A": ["a1", "a2"], "C": ["c1", "D"], "D": ["d1", "d2"]}
+    nodes = {
+        nid: SimpleNamespace(nodeId=nid, childNodes=[], parentNode=None)
+        for nid in ["root", "A", "a1", "a2", "C", "c1", "D", "d1", "d2"]
+    }
+    for parent, children in edges.items():
+        for child in children:
+            nodes[parent].childNodes.append(nodes[child])
+            nodes[child].parentNode = nodes[parent]
+    lookup = {nid: SimpleNamespace(tree_node=node) for nid, node in nodes.items()}
+    scores = {
+        "root": 0,
+        "A": 0,
+        "a1": 0,
+        "a2": 3,
+        "C": 1,
+        "c1": 1,
+        "D": 2,
+        "d1": 2,
+        "d2": 2,
+    }
+
+    # C subtree: mean 8/5 = 1.6; D subtree: 2; whole tree: 11/9; A subtree: 1
+    result = find_converging_subtree(lookup, scores, threshold=1.5)
+    assert result.root_id == "C"
+    assert result.node_ids == {"C", "c1", "D", "d1", "d2"}
+    assert result.average_score == pytest.approx(1.6)
+    assert result.n_candidates == 5  # C, D, d1, d2, a2
+
+    # above the C mean only D (and single nodes) remain
+    assert find_converging_subtree(lookup, scores, threshold=1.7).root_id == "D"
+    # below the overall mean the whole tree qualifies
+    assert find_converging_subtree(lookup, scores, threshold=1.0).root_id == "root"
+    # restricted search stays inside the clade
+    assert (
+        find_converging_subtree(lookup, scores, 0.5, within_node_id="A").root_id == "A"
+    )
+    with pytest.raises(ValueError):
+        find_converging_subtree(lookup, scores, threshold=5.0)
